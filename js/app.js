@@ -88,6 +88,43 @@ function formatLocalDate(d = new Date()) {
     return `${y}-${m}-${day}`;
 }
 
+// 获取用户所在城市/地区（基于 IP，缓存 1 小时）
+async function getUserLocation() {
+    const cached = localStorage.getItem('zz_user_location');
+    const cachedTime = parseInt(localStorage.getItem('zz_user_location_time') || '0');
+    if (cached && Date.now() - cachedTime < 60 * 60 * 1000) {
+        return cached;
+    }
+    try {
+        const r = await fetch('https://geolocation-db.com/json/');
+        const data = await r.json();
+        let loc = '';
+        if (data.city && data.city !== 'null') loc = data.city;
+        if (data.state && data.state !== 'null') {
+            if (loc) loc += ', ' + data.state;
+            else loc = data.state;
+        }
+        if (data.country_name && data.country_name !== 'null' && !loc.includes(data.country_name)) {
+            if (loc) loc += ', ' + data.country_name;
+            else loc = data.country_name;
+        }
+        if (!loc) loc = '未知位置';
+        localStorage.setItem('zz_user_location', loc);
+        localStorage.setItem('zz_user_location_time', Date.now().toString());
+        return loc;
+    } catch (e) {
+        return cached || '未知位置';
+    }
+}
+
+// 获取本地时间字符串（HH:MM）
+function formatLocalTime(d = new Date()) {
+    const date = d instanceof Date ? d : new Date(d);
+    const h = String(date.getHours()).padStart(2, '0');
+    const m = String(date.getMinutes()).padStart(2, '0');
+    return `${h}:${m}`;
+}
+
 // ========== 行情数据服务 ==========
 // 使用腾讯财经接口（支持 CORS）获取股票/ETF 实时行情与历史 K 线
 // 场外基金使用天天基金 JSONP 接口获取历史净值
@@ -2876,15 +2913,19 @@ function initMemo() {
         reader.readAsDataURL(file);
     });
 
-    $('#saveMemoBtn').addEventListener('click', () => {
+    $('#saveMemoBtn').addEventListener('click', async () => {
         const text = $('#memoInput').value.trim();
         if (!text && !pendingImage) return showToast('请输入内容或插入图片');
         const memos = getData('memos', []);
+        const now = new Date();
+        const location = await getUserLocation();
         memos.unshift({
             id: Date.now(),
             text,
             image: pendingImage,
-            date: $('#memoDate').value || formatLocalDate(new Date())
+            date: $('#memoDate').value || formatLocalDate(now),
+            time: formatLocalTime(now),
+            location: location
         });
         setData('memos', memos);
         renderMemos(memos);
@@ -2906,12 +2947,16 @@ function renderMemos(memos) {
     list.innerHTML = memos.map(m => {
         const d = m.date ? new Date(m.date + 'T00:00:00') : new Date(m.createdAt || m.id);
         const imgHtml = m.image ? `<div class="memo-image"><img src="${m.image}" alt="备忘录图片" loading="lazy"></div>` : '';
+        const timeStr = m.time || formatLocalTime(d);
+        const locStr = m.location ? ` · ${escapeHtml(m.location)}` : '';
         return `
             <div class="memo-item">
-                <button class="memo-delete" data-id="${m.id}">🗑️</button>
-                ${m.text ? `<div class="memo-content">${escapeHtml(m.text)}</div>` : ''}
+                <div class="memo-header">
+                    ${m.text ? `<div class="memo-content">${escapeHtml(m.text)}</div>` : ''}
+                    <button class="memo-delete" data-id="${m.id}">🗑️</button>
+                </div>
                 ${imgHtml}
-                <div class="memo-date">${formatDate(d)}</div>
+                <div class="memo-date">${formatDate(d)} ${timeStr}${locStr}</div>
             </div>
         `;
     }).join('');
@@ -3000,18 +3045,22 @@ function initMoodDiary() {
         });
     });
 
-    $('#saveMoodDiaryBtn').addEventListener('click', () => {
+    $('#saveMoodDiaryBtn').addEventListener('click', async () => {
         const content = $('#moodDiaryInput').value.trim();
         const progress = $('#moodDiaryProgress').value.trim();
         const date = selectedMoodDate || formatLocalDate(new Date());
         if (!content && !progress) return showToast('写点什么再保存吧');
 
         const diaries = getData('moodDiaries', []);
+        const now = new Date();
+        const location = await getUserLocation();
         // 同一天只保留一条，覆盖更新
         const filtered = diaries.filter(d => d.date !== date);
         filtered.unshift({
             id: Date.now(),
             date,
+            time: formatLocalTime(now),
+            location: location,
             weather: selectedWeather,
             mood: selectedMood,
             content,
@@ -3067,13 +3116,17 @@ function renderMoodDiaries() {
     }
     list.innerHTML = diaries.map(d => `
         <div class="mood-diary-item">
-            <button class="mood-diary-delete" data-id="${d.id}">✕</button>
             <div class="mood-diary-item-header">
-                <span class="mood-diary-item-date">${d.date}</span>
-                <span class="mood-diary-item-weather">${d.weather}</span>
-                <span class="mood-diary-item-mood">${d.mood}</span>
+                <span class="mood-diary-item-date">${d.date} ${d.time || ''}${d.location ? ' · ' + escapeHtml(d.location) : ''}</span>
+                <div class="mood-diary-item-meta">
+                    <span class="mood-diary-item-weather">${d.weather}</span>
+                    <span class="mood-diary-item-mood">${d.mood}</span>
+                </div>
             </div>
-            ${d.content ? `<div class="mood-diary-item-content">${escapeHtml(d.content)}</div>` : ''}
+            <div class="mood-diary-item-body">
+                ${d.content ? `<span class="mood-diary-item-content">${escapeHtml(d.content)}</span>` : '<span class="mood-diary-item-content mood-empty">（无文字）</span>'}
+                <button class="mood-diary-delete" data-id="${d.id}">🗑️</button>
+            </div>
             ${d.progress ? `<div class="mood-diary-item-progress">🌱 ${escapeHtml(d.progress)}</div>` : ''}
         </div>
     `).join('');

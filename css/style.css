@@ -3374,10 +3374,18 @@ button {
     position: relative;
 }
 
+.memo-item .memo-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    justify-content: space-between;
+}
+
 .memo-item .memo-content {
     font-size: 14px;
     line-height: 1.6;
     white-space: pre-wrap;
+    flex: 1;
 }
 
 .memo-item .memo-date {
@@ -3387,14 +3395,13 @@ button {
 }
 
 .memo-item .memo-delete {
-    position: absolute;
-    top: 10px;
-    right: 12px;
     background: none;
     border: none;
     color: #ddd;
     cursor: pointer;
     font-size: 16px;
+    padding: 0;
+    flex-shrink: 0;
 }
 
 .memo-item .memo-delete:hover {
@@ -3984,14 +3991,12 @@ button {
 }
 
 .mood-diary-delete {
-    position: absolute;
-    top: 10px;
-    right: 12px;
     background: none;
     border: none;
     color: #ddd;
     font-size: 16px;
     cursor: pointer;
+    padding: 0;
 }
 
 .mood-diary-delete:hover {
@@ -4000,10 +4005,18 @@ button {
 
 .mood-diary-item-header {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
+    justify-content: space-between;
     gap: 10px;
     margin-bottom: 10px;
     font-size: 14px;
+}
+
+.mood-diary-item-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
 }
 
 .mood-diary-item-date {
@@ -4021,7 +4034,24 @@ button {
     line-height: 1.7;
     color: var(--text);
     white-space: pre-wrap;
+}
+
+.mood-diary-item-body {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
     margin-bottom: 8px;
+    flex-wrap: wrap;
+}
+
+.mood-diary-item-body .mood-diary-item-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.mood-diary-item-body .mood-diary-item-content.mood-empty {
+    color: var(--text-secondary);
+    font-style: italic;
 }
 
 .mood-diary-item-progress {
