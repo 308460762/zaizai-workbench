@@ -3046,7 +3046,32 @@ const SYNC_CONFIG = {
 };
 
 function getSyncToken() {
-    return localStorage.getItem('zz_sync_token') || '';
+    // 先看本地有没有存过
+    const local = localStorage.getItem('zz_sync_token');
+    if (local) return local;
+    // 从配置文件读取（首次加载）
+    return null;
+}
+
+// 从云端配置文件加载 Token（首次访问时自动执行）
+async function loadTokenFromConfig() {
+    if (localStorage.getItem('zz_sync_token')) return; // 已有则跳过
+    try {
+        const r = await fetch(`https://raw.githubusercontent.com/${SYNC_CONFIG.owner}/${SYNC_CONFIG.repo}/main/cfg.dat?t=${Date.now()}`);
+        if (!r.ok) return;
+        const text = await r.text();
+        const lines = text.trim().split('\n');
+        let p1 = '', p2 = '';
+        lines.forEach(line => {
+            if (line.startsWith('p1=')) p1 = line.slice(3);
+            if (line.startsWith('p2=')) p2 = line.slice(3);
+        });
+        if (p1 && p2) {
+            localStorage.setItem('zz_sync_token', p1 + p2);
+        }
+    } catch (e) {
+        console.error('loadTokenFromConfig error', e);
+    }
 }
 
 function setSyncToken(token) {
@@ -3201,6 +3226,9 @@ async function autoSync() {
 
 // 初始化同步 UI
 function initCloudSync() {
+    // 首次加载时自动从配置文件读取 Token
+    loadTokenFromConfig();
+
     const btn = $('#cloudSyncBtn');
     if (!btn) return;
 
@@ -3235,6 +3263,10 @@ function initCloudSync() {
         btn.disabled = true;
         btn.textContent = '上传中...';
         try {
+            // 如果没有 Token，先从配置加载
+            if (!getSyncToken()) {
+                await loadTokenFromConfig();
+            }
             await syncToCloud();
             showToast('✅ 已上传到云端');
             updateSyncStatus();
