@@ -78,6 +78,16 @@ function showToast(msg) {
     clearTimeout(t._timeout);
     t._timeout = setTimeout(() => t.classList.remove('show'), 2000);
 }
+
+// 获取本地时区日期字符串（YYYY-MM-DD），避免 UTC 时差问题
+function formatLocalDate(d = new Date()) {
+    const date = d instanceof Date ? d : new Date(d);
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+}
+
 // ========== 行情数据服务 ==========
 // 使用腾讯财经接口（支持 CORS）获取股票/ETF 实时行情与历史 K 线
 // 场外基金使用天天基金 JSONP 接口获取历史净值
@@ -706,7 +716,7 @@ function initSavings() {
     const goal = getData('monthlyGoal', 0);
     $('#dailyBudget').value = budget || '';
     $('#monthlyGoalInput').value = goal || '';
-    $('#transDate').value = new Date().toISOString().split('T')[0];
+    $('#transDate').value = formatLocalDate(new Date());
 
     updateSavingsDisplay();
 
@@ -728,7 +738,7 @@ function initSavings() {
         const amount = parseFloat($('#saveAmountInput').value);
         if (!amount || amount <= 0) return showToast('请输入存入金额');
         const transactions = getData('transactions', []);
-        const today = new Date().toISOString().split('T')[0];
+        const today = formatLocalDate(new Date());
         transactions.unshift({
             id: Date.now(),
             amount,
@@ -814,7 +824,7 @@ function addTransaction() {
     }
 
     const note = $('#transNote').value.trim() || category;
-    const date = $('#transDate').value || new Date().toISOString().split('T')[0];
+    const date = $('#transDate').value || formatLocalDate(new Date());
 
     const transactions = getData('transactions', []);
     transactions.unshift({ id: Date.now(), amount, type, category, note, date });
@@ -831,7 +841,7 @@ function updateSavingsDisplay() {
     const budget = getData('dailyBudget', 0);
     const monthlyGoal = getData('monthlyGoal', 0);
     const transactions = getData('transactions', []);
-    const today = new Date().toISOString().split('T')[0];
+    const today = formatLocalDate(new Date());
     const now = new Date();
     const monthStart = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
 
@@ -898,7 +908,7 @@ APP.profitSelectedDate = new Date(); // 选中的日期/月份/年份
 
 function initStocks() {
     // 默认日期
-    $('#recordDate').value = new Date().toISOString().slice(0, 10);
+    $('#recordDate').value = formatLocalDate(new Date());
 
     // Tab切换
     $$('.stock-tab').forEach(tab => {
@@ -1617,7 +1627,7 @@ function initInspiration() {
             id: Date.now(),
             text,
             tags: [...selectedTags],
-            date: new Date().toISOString().split('T')[0]
+            date: formatLocalDate(new Date())
         });
         setData('inspirations', inspirations);
         renderInspirations(inspirations);
@@ -1758,7 +1768,7 @@ function renderTrends() {
                 id: Date.now(),
                 text: `🔥 ${btn.dataset.title} - ${btn.dataset.desc}`,
                 tags: ['热点'],
-                date: new Date().toISOString().split('T')[0]
+                date: formatLocalDate(new Date())
             });
             setData('inspirations', inspirations);
             showToast('已保存为灵感');
@@ -2075,7 +2085,7 @@ function showTutorialDetail(tutorial) {
 // ========== 内容复盘 ==========
 function initReview() {
     const today = new Date();
-    $('#reviewDate').value = today.toISOString().split('T')[0];
+    $('#reviewDate').value = formatLocalDate(today);
     $('#reviewFormTitle').textContent = `${today.getMonth() + 1}月${today.getDate()}日复盘`;
 
     const reviews = getData('reviews', []);
@@ -2131,7 +2141,7 @@ function renderReviews(reviews) {
 
 // ========== 工作日程 ==========
 function initSchedule() {
-    $('#scheduleDate').value = new Date().toISOString().split('T')[0];
+    $('#scheduleDate').value = formatLocalDate(new Date());
 
     // 日程编辑弹窗事件
     $('#closeScheduleEditModal').addEventListener('click', closeScheduleEdit);
@@ -2227,14 +2237,14 @@ function renderWeekView(d) {
     $('#scheduleTitle').textContent = `${weekStart.getFullYear()}年 ${formatDateShort(weekStart)} - ${formatDateShort(weekEnd)}`;
 
     const schedules = getData('schedules', []);
-    const today = new Date().toISOString().split('T')[0];
+    const today = formatLocalDate(new Date());
     const weekNames = ['一', '二', '三', '四', '五', '六', '日'];
 
     let html = '<div class="week-grid">';
     for (let i = 0; i < 7; i++) {
         const date = new Date(weekStart);
         date.setDate(date.getDate() + i);
-        const dateStr = date.toISOString().split('T')[0];
+        const dateStr = formatLocalDate(date);
         const isToday = dateStr === today;
         const daySchedules = schedules.filter(s => s.date === dateStr);
 
@@ -2263,7 +2273,7 @@ function renderMonthView(d) {
     $('#scheduleTitle').textContent = `${year}年${month + 1}月`;
 
     const schedules = getData('schedules', []);
-    const today = new Date().toISOString().split('T')[0];
+    const today = formatLocalDate(new Date());
     const firstDay = new Date(year, month, 1).getDay();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     const adjustedFirst = firstDay === 0 ? 6 : firstDay - 1; // Monday start
@@ -2618,12 +2628,12 @@ function addMistake(quiz, wrongIdx) {
             ans: quiz.ans,
             wrong: wrongIdx,
             count: 1,
-            date: new Date().toISOString().split('T')[0]
+            date: formatLocalDate(new Date())
         });
     } else {
         existing.wrong = wrongIdx;
         existing.count++;
-        existing.date = new Date().toISOString().split('T')[0];
+        existing.date = formatLocalDate(new Date());
     }
     setData('englishMistakes', mistakes);
 }
@@ -2771,7 +2781,7 @@ async function loadNews() {
                     title: n.title,
                     source: n.source_id || '新闻来源',
                     link: n.link,
-                    date: n.pubDate ? new Date(n.pubDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]
+                    date: n.pubDate ? formatLocalDate(new Date(n.pubDate)) : formatLocalDate(new Date())
                 }));
                 setData('newsCache', { data: news, time: Date.now() });
                 renderNews(news);
@@ -2787,14 +2797,14 @@ async function loadNews() {
     } else {
         // 兜底数据
         const fallback = [
-            { id: 1, title: '中国科技创新成果持续涌现，多项技术达国际领先水平', source: '新华社', date: new Date().toISOString().split('T')[0], link: '#' },
-            { id: 2, title: '数字经济规模持续扩大，成为推动高质量发展重要引擎', source: '人民日报', date: new Date().toISOString().split('T')[0], link: '#' },
-            { id: 3, title: '绿色低碳发展取得新成效，新能源产业快速发展', source: '央视新闻', date: new Date().toISOString().split('T')[0], link: '#' },
-            { id: 4, title: '乡村振兴战略深入推进，农村面貌持续改善', source: '农民日报', date: new Date().toISOString().split('T')[0], link: '#' },
-            { id: 5, title: '教育领域改革不断深化，人才培养质量稳步提升', source: '中国教育报', date: new Date().toISOString().split('T')[0], link: '#' },
-            { id: 6, title: '文化自信持续增强，中华优秀传统文化焕发新活力', source: '光明日报', date: new Date().toISOString().split('T')[0], link: '#' },
-            { id: 7, title: '体育强国建设加速推进，全民健身热潮持续升温', source: '中国体育报', date: new Date().toISOString().split('T')[0], link: '#' },
-            { id: 8, title: '一带一路合作不断深化，互利共赢成果丰硕', source: '经济日报', date: new Date().toISOString().split('T')[0], link: '#' },
+            { id: 1, title: '中国科技创新成果持续涌现，多项技术达国际领先水平', source: '新华社', date: formatLocalDate(new Date()), link: '#' },
+            { id: 2, title: '数字经济规模持续扩大，成为推动高质量发展重要引擎', source: '人民日报', date: formatLocalDate(new Date()), link: '#' },
+            { id: 3, title: '绿色低碳发展取得新成效，新能源产业快速发展', source: '央视新闻', date: formatLocalDate(new Date()), link: '#' },
+            { id: 4, title: '乡村振兴战略深入推进，农村面貌持续改善', source: '农民日报', date: formatLocalDate(new Date()), link: '#' },
+            { id: 5, title: '教育领域改革不断深化，人才培养质量稳步提升', source: '中国教育报', date: formatLocalDate(new Date()), link: '#' },
+            { id: 6, title: '文化自信持续增强，中华优秀传统文化焕发新活力', source: '光明日报', date: formatLocalDate(new Date()), link: '#' },
+            { id: 7, title: '体育强国建设加速推进，全民健身热潮持续升温', source: '中国体育报', date: formatLocalDate(new Date()), link: '#' },
+            { id: 8, title: '一带一路合作不断深化，互利共赢成果丰硕', source: '经济日报', date: formatLocalDate(new Date()), link: '#' },
         ];
         renderNews(fallback);
     }
@@ -2820,7 +2830,7 @@ function renderNews(newsList) {
                 id: Date.now(),
                 text: `📰 ${btn.dataset.title}`,
                 tags: ['新闻'],
-                date: new Date().toISOString().split('T')[0]
+                date: formatLocalDate(new Date())
             });
             setData('inspirations', inspirations);
             showToast('已保存为灵感');
@@ -2836,8 +2846,8 @@ function initNews() {
 // ========== 备忘录 ==========
 function initMemo() {
     const memos = getData('memos', []);
-    $('#memoDate').value = new Date().toISOString().split('T')[0];
-    $('#memoDate').max = new Date().toISOString().split('T')[0];
+    $('#memoDate').value = formatLocalDate(new Date());
+    $('#memoDate').max = formatLocalDate(new Date());
     renderMemos(memos);
     initMoodDiary();
 
@@ -2874,7 +2884,7 @@ function initMemo() {
             id: Date.now(),
             text,
             image: pendingImage,
-            date: $('#memoDate').value || new Date().toISOString().split('T')[0]
+            date: $('#memoDate').value || formatLocalDate(new Date())
         });
         setData('memos', memos);
         renderMemos(memos);
@@ -2938,10 +2948,26 @@ const MOOD_EMOJIS = [
 
 let selectedWeather = '☀️';
 let selectedMood = '😊';
+let selectedMoodDate = formatLocalDate(new Date());
 
 function initMoodDiary() {
-    const today = new Date().toISOString().split('T')[0];
-    $('#moodDiaryDateDisplay').textContent = today;
+    selectedMoodDate = formatLocalDate(new Date());
+    const dateInput = $('#moodDiaryDateInput');
+    if (dateInput) {
+        dateInput.value = selectedMoodDate;
+        dateInput.max = formatLocalDate(new Date());
+        dateInput.addEventListener('change', (e) => {
+            selectedMoodDate = e.target.value;
+            // 加载该日期已有日记（如果有）
+            loadMoodDiaryForDate(selectedMoodDate);
+        });
+    }
+
+    // 让 HTML 的 onchange 能调用
+    window.updateMoodDateDisplay = (val) => {
+        selectedMoodDate = val;
+        loadMoodDiaryForDate(val);
+    };
 
     // 渲染天气选择
     $('#moodWeatherOptions').innerHTML = MOOD_WEATHER.map(w => `
@@ -2977,7 +3003,7 @@ function initMoodDiary() {
     $('#saveMoodDiaryBtn').addEventListener('click', () => {
         const content = $('#moodDiaryInput').value.trim();
         const progress = $('#moodDiaryProgress').value.trim();
-        const date = new Date().toISOString().split('T')[0];
+        const date = selectedMoodDate || formatLocalDate(new Date());
         if (!content && !progress) return showToast('写点什么再保存吧');
 
         const diaries = getData('moodDiaries', []);
@@ -2998,7 +3024,38 @@ function initMoodDiary() {
         showToast('心情日记已保存');
     });
 
+    loadMoodDiaryForDate(selectedMoodDate);
     renderMoodDiaries();
+}
+
+function loadMoodDiaryForDate(date) {
+    const diaries = getData('moodDiaries', []);
+    const existing = diaries.find(d => d.date === date);
+    if (existing) {
+        selectedWeather = existing.weather;
+        selectedMood = existing.mood;
+        $('#moodDiaryInput').value = existing.content || '';
+        $('#moodDiaryProgress').value = existing.progress || '';
+        // 重新渲染选中状态
+        $$('#moodWeatherOptions .mood-option-btn').forEach(b => {
+            b.classList.toggle('selected', b.dataset.value === selectedWeather);
+        });
+        $$('#moodMoodOptions .mood-option-btn').forEach(b => {
+            b.classList.toggle('selected', b.dataset.value === selectedMood);
+        });
+    } else {
+        // 清空为默认
+        selectedWeather = '☀️';
+        selectedMood = '😊';
+        $('#moodDiaryInput').value = '';
+        $('#moodDiaryProgress').value = '';
+        $$('#moodWeatherOptions .mood-option-btn').forEach(b => {
+            b.classList.toggle('selected', b.dataset.value === selectedWeather);
+        });
+        $$('#moodMoodOptions .mood-option-btn').forEach(b => {
+            b.classList.toggle('selected', b.dataset.value === selectedMood);
+        });
+    }
 }
 
 function renderMoodDiaries() {
@@ -3362,7 +3419,7 @@ function initBackupRestore() {
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        const date = new Date().toISOString().split('T')[0];
+        const date = formatLocalDate(new Date());
         a.href = url;
         a.download = `zaizai-workbench-backup-${date}.json`;
         document.body.appendChild(a);
