@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="崽崽工作台">
+    <meta name="theme-color" content="#FF6B8A">
+    <title>崽崽工作台</title>
+    <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png">
+    <link rel="manifest" href="manifest.json">
+    <link rel="stylesheet" href="css/style.css?v=3">
+</head>
+<body>
+    <!-- 侧边栏 -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="sidebar-logo">🐣</div>
+            <div class="sidebar-title">崽崽工作台</div>
+            <button class="sidebar-toggle" id="sidebarToggle" title="收起菜单">✕</button>
+        </div>
+        <nav class="sidebar-nav" id="sidebarNav">
+            <!-- 动态生成 -->
+        </nav>
+        <div class="sidebar-footer">
+            <button class="emoji-settings-btn" id="emojiSettingsBtn" title="自定义图标">🎨 自定义图标</button>
+            <button class="backup-btn" id="backupBtn" title="备份与恢复数据">💾 数据备份</button>
+        </div>
+    </aside>
+
+    <!-- 主内容区 -->
+    <div class="main-content" id="mainContent">
+        <!-- 顶部栏 -->
+        <header class="topbar">
+            <div class="topbar-left">
+                <button class="menu-btn" id="menuBtn" title="菜单">☰</button>
+                <div class="topbar-logo-mobile">🐣 崽崽工作台</div>
+            </div>
+            <div class="topbar-center">
+                <div class="date-display" id="dateDisplay"></div>
+                <div class="weather-display" id="weatherDisplay">
+                    <span class="weather-icon">☀️</span>
+                    <span class="weather-temp" id="weatherTemp">--°C</span>
+                    <span class="weather-desc" id="weatherDesc">加载中...</span>
+                </div>
+                <!-- 全局搜索 -->
+                <div class="global-search" id="globalSearch">
+                    <span class="search-icon">🔍</span>
+                    <input type="text" id="globalSearchInput" placeholder="搜索功能、任务、灵感...">
+                    <div class="search-results" id="searchResults" style="display:none;"></div>
+                </div>
+            </div>
+            <div class="topbar-right">
+                <div class="user-info">
+                    <div class="user-avatar-wrapper" id="userAvatarWrapper" title="点击设置头像">
+                        <div class="user-avatar" id="userAvatar">🐣</div>
+                        <input type="file" id="avatarFileInput" accept="image/*" style="display:none;">
+                    </div>
+                    <div class="user-text-info">
+                        <div class="user-role" id="userRole" contenteditable="true" data-placeholder="你的职业/身份">自媒体创作者</div>
+                        <div class="user-signature" id="userSignature" contenteditable="true" data-placeholder="个性签名（20字以内）" maxlength="20">每天进步一点点✨</div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- 内容面板 -->
+        <div class="content-panels" id="contentPanels">
+            <!-- 每日计划 -->
+            <section class="panel active" id="panel-daily-plan">
+                <div class="panel-header">
+                    <h2>📋 每日计划</h2>
+                    <span class="panel-date" id="dailyPlanDate"></span>
+                </div>
+                <!-- 面板内搜索 + 快捷跳转 -->
+                <div class="panel-quick-bar">
+                    <div class="panel-search">
+                        <span>🔍</span>
+                        <input type="text" id="panelSearchInput" placeholder="搜索任务、日程、灵感...">
+                    </div>
+                    <button class="quick-jump-btn" id="quickJumpSchedule" title="跳转到工作日程">📅 今日日程</button>
+                </div>
+                <div class="task-input-group">
+                    <input type="text" id="newTaskInput" placeholder="添加新任务..." maxlength="100">
+                    <button id="addTaskBtn">➕ 添加</button>
+                </div>
+                <ul class="task-list" id="taskList"></ul>
+                <div class="task-progress" id="taskProgress"></div>
+            </section>
+
+            <!-- 存钱计划 -->
+            <section class="panel" id="panel-savings">
+                <div class="panel-header">
+                    <h2>💰 存钱计划</h2>
+                    <span class="panel-date" id="savingsMonth"></span>
+                </div>
+
+                <!-- 四宫格概览卡片 -->
+                <div class="savings-overview">
+                    <div class="overview-card budget">
+                        <div class="overview-bar"></div>
+                        <div class="overview-label">今日预算</div>
+                        <div class="overview-value" id="overviewBudget">¥0</div>
+                    </div>
+                    <div class="overview-card spent">
+                        <div class="overview-bar"></div>
+                        <div class="overview-label">今日已花</div>
+                        <div class="overview-value" id="overviewSpent">¥0</div>
+                    </div>
+                    <div class="overview-card income">
+                        <div class="overview-bar"></div>
+                        <div class="overview-label">今日收入</div>
+                        <div class="overview-value" id="overviewIncome">¥0</div>
+                    </div>
+                    <div class="overview-card saved">
+                        <div class="overview-bar"></div>
+                        <div class="overview-label">本月已存</div>
+                        <div class="overview-value" id="overviewSaved">¥0</div>
+                    </div>
+                </div>
+
+                <!-- 设置今日预算 -->
+                <div class="savings-block">
+                    <div class="block-title">💰 设置今日预算</div>
+                    <div class="budget-input-row">
+                        <input type="number" id="dailyBudget" placeholder="输入金额 ¥" min="0" step="0.01">
+                        <button id="setBudgetBtn">设置预算</button>
+                    </div>
+                    <div class="budget-progress">
+                        <div class="progress-label">
+                            <span>今日预算使用进度</span>
+                            <span id="budgetPercent">0%</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="budgetFill" style="width: 0%"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 本月存钱目标 -->
+                <div class="savings-block">
+                    <div class="block-title">🎯 本月存钱目标</div>
+                    <div class="goal-progress">
+                        <div class="progress-label">
+                            <span id="goalText">本月已存 ¥0 / 目标 ¥0</span>
+                            <span id="goalPercent">0%</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill goal-fill" id="goalFill" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <div class="goal-form">
+                        <input type="number" id="monthlyGoalInput" placeholder="月存目标">
+                        <button id="setGoalBtn">设目标</button>
+                        <input type="number" id="saveAmountInput" placeholder="存入金额">
+                        <button id="addSaveBtn">存一笔</button>
+                    </div>
+                </div>
+
+                <!-- 记一笔收支 -->
+                <div class="savings-block">
+                    <div class="block-title">🧾 记一笔收支</div>
+                    <div class="transaction-form">
+                        <div class="trans-row">
+                            <input type="date" id="transDate">
+                            <select id="transType">
+                                <option value="expense">支出</option>
+                                <option value="income">收入</option>
+                            </select>
+                        </div>
+                        <div class="trans-row">
+                            <div class="category-box" id="categoryBox">
+                                <select id="transCategory">
+                                    <option value="餐饮">餐饮</option>
+                                    <option value="交通">交通</option>
+                                    <option value="购物">购物</option>
+                                    <option value="娱乐">娱乐</option>
+                                    <option value="居住">居住</option>
+                                    <option value="工资">工资</option>
+                                    <option value="兼职">兼职</option>
+                                    <option value="理财">理财</option>
+                                    <option value="其他">其他</option>
+                                    <option value="自定义">✏️ 自定义</option>
+                                </select>
+                                <input type="text" id="customCategory" placeholder="输入分类" maxlength="10" style="display:none;">
+                            </div>
+                            <input type="number" id="transAmount" placeholder="¥" min="0" step="0.01">
+                        </div>
+                        <div class="trans-row">
+                            <input type="text" id="transNote" placeholder="备注（可选）" maxlength="30">
+                            <button id="addTransBtn">记一笔</button>
+                        </div>
+                    </div>
+                    <div class="transaction-list" id="transactionList"></div>
+                </div>
+            </section>
+
+            <!-- 股票基金 -->
+            <section class="panel" id="panel-stocks">
+                <div class="panel-header">
+                    <h2>📈 股票基金</h2>
+                </div>
+
+                <!-- 顶部Tab -->
+                <div class="stock-tabs">
+                    <button class="stock-tab active" data-tab="holdings">全部持有</button>
+                    <button class="stock-tab" data-tab="profit">收益明细</button>
+                    <button class="stock-tab" data-tab="records">交易记录</button>
+                </div>
+
+                <!-- 全部持有 -->
+                <div class="stock-panel active" id="stockPanel-holdings">
+                    <div class="stock-summary">
+                        <div class="summary-card">
+                            <div class="summary-label">总持仓市值</div>
+                            <div class="summary-value" id="totalMarketValue">¥0.00</div>
+                        </div>
+                        <div class="summary-card">
+                            <div class="summary-label">累计收益</div>
+                            <div class="summary-value" id="totalProfit">¥0.00</div>
+                        </div>
+                        <div class="summary-card">
+                            <div class="summary-label">今日收益</div>
+                            <div class="summary-value" id="todayProfit">¥0.00</div>
+                        </div>
+                    </div>
+                    <button class="btn-add-holding" id="addHoldingBtn">+ 添加持仓</button>
+                    <div class="add-holding-form" id="addHoldingForm" style="display:none;">
+                        <select id="holdingType">
+                            <option value="stock">股票</option>
+                            <option value="fund">基金</option>
+                        </select>
+                        <input type="text" id="holdingCode" placeholder="代码">
+                        <input type="text" id="holdingName" placeholder="名称">
+                        <input type="number" id="holdingShares" placeholder="持仓数量/份额" min="0" step="0.01">
+                        <input type="number" id="holdingCost" placeholder="成本价/成本净值" min="0" step="0.0001">
+                        <input type="number" id="holdingPrice" placeholder="当前价/当前净值" min="0" step="0.0001">
+                        <button id="confirmHoldingBtn">确认添加</button>
+                        <button id="cancelHoldingBtn">取消</button>
+                    </div>
+                    <div class="holding-list" id="holdingList"></div>
+                </div>
+
+                <!-- 收益明细 -->
+                                <div class="stock-panel" id="stockPanel-profit">
+                    <div class="profit-calendar-header">
+                        <span>收益日历</span>
+                        <div class="profit-period-tabs">
+                            <button class="profit-period active" data-period="day">日</button>
+                            <button class="profit-period" data-period="month">月</button>
+                            <button class="profit-period" data-period="year">年</button>
+                        </div>
+                    </div>
+                    <div class="profit-calendar-nav">
+                        <button id="profitPrev">◀</button>
+                        <span id="profitTitle">2026年7月</span>
+                        <button id="profitNext">▶</button>
+                    </div>
+                    <div class="profit-calendar-toolbar" style="padding: 8px 16px; display: flex; justify-content: space-between; align-items: center;">
+                        <span id="quoteStatus" style="font-size: 12px; color: #999;">点击刷新获取最新行情</span>
+                        <button id="refreshQuotesBtn" style="background: #FF6B8A; color: #fff; border: none; border-radius: 8px; padding: 6px 12px; font-size: 13px; font-weight: 600;">🔄 刷新行情</button>
+                    </div>
+                    <div class="profit-calendar" id="profitCalendar"></div>
+                    <div class="profit-detail-header">
+                        <span id="profitDetailTitle">当日收益明细</span>
+                        <span id="profitDetailTotal">¥0.00</span>
+                    </div>
+                    <div class="profit-detail-list" id="profitDetailList"></div>
+                </div>
+                    <div class="profit-calendar-nav">
+                        <button id="profitPrev">◀</button>
+                        <span id="profitTitle">2026年7月</span>
+                        <button id="profitNext">▶</button>
+                    </div>
+                    <div class="profit-calendar" id="profitCalendar"></div>
+                    <div class="profit-detail-header">
+                        <span id="profitDetailTitle">当日收益明细</span>
+                        <span id="profitDetailTotal">¥0.00</span>
+                    </div>
+                    <div class="profit-detail-list" id="profitDetailList"></div>
+                </div>
+
+                <!-- 交易记录 -->
+                <div class="stock-panel" id="stockPanel-records">
+                    <div class="record-form">
+                        <select id="recordType">
+                            <option value="buy">买入</option>
+                            <option value="sell">卖出</option>
+                        </select>
+                        <select id="recordHolding"></select>
+                        <input type="number" id="recordShares" placeholder="数量" min="0" step="0.01">
+                        <input type="number" id="recordPrice" placeholder="价格" min="0" step="0.0001">
+                        <input type="date" id="recordDate">
+                        <button id="addRecordBtn">记录交易</button>
+                    </div>
+                    <div class="record-list" id="recordList"></div>
+                </div>
+            </section>
+
+            <!-- 选题灵感 -->
+            <section class="panel" id="panel-inspiration">
+                <div class="panel-header">
+                    <h2>💡 选题灵感</h2>
+                </div>
+                <div class="inspiration-input-group">
+                    <textarea id="inspirationInput" placeholder="记录你的创作灵感..." maxlength="500" rows="3"></textarea>
+                    <div class="inspiration-tags">
+                        <span class="tag" data-tag="美妆">美妆</span>
+                        <span class="tag" data-tag="vlog">vlog</span>
+                        <span class="tag" data-tag="两性">两性</span>
+                        <span class="tag" data-tag="手势舞">手势舞</span>
+                        <span class="tag" data-tag="穿搭">穿搭</span>
+                        <span class="tag" data-tag="美食">美食</span>
+                        <span class="tag" data-tag="旅行">旅行</span>
+                    </div>
+                    <button id="saveInspirationBtn">💾 保存灵感</button>
+                </div>
+                <div class="inspiration-list" id="inspirationList"></div>
+            </section>
+
+            <!-- 爆款热点 -->
+            <section class="panel" id="panel-hot-trends">
+                <div class="panel-header">
+                    <h2>🔥 爆款热点追踪</h2>
+                </div>
+                <div class="trend-actions">
+                    <button class="trend-refresh-btn douyin" data-platform="douyin">🔄 刷新抖音热点</button>
+                    <button class="trend-refresh-btn xiaohongshu" data-platform="xiaohongshu">🔄 刷新小红书热点</button>
+                    <span class="trend-hint">💡 标注适合二创：美妆/vlog/两性/手势舞</span>
+                </div>
+                <div class="trend-filter">
+                    <button class="filter-tag active" data-filter="all">全部</button>
+                    <button class="filter-tag" data-filter="美妆">美妆</button>
+                    <button class="filter-tag" data-filter="vlog">vlog</button>
+                    <button class="filter-tag" data-filter="两性">两性</button>
+                    <button class="filter-tag" data-filter="手势舞">手势舞</button>
+                </div>
+                <div class="trend-list" id="trendList"></div>
+            </section>
+
+            <!-- 视频剪辑教程 -->
+            <section class="panel" id="panel-video-edit">
+                <div class="panel-header">
+                    <h2>🎬 视频剪辑教程</h2>
+                </div>
+
+                <!-- 学习路径横幅 -->
+                <div class="video-hero-banner">
+                    <div class="video-hero-icon">🎬</div>
+                    <div class="video-hero-info">
+                        <div class="video-hero-title">剪辑创作 · 从零到创作者</div>
+                        <div class="video-hero-desc">大秘为你规划了完整学习路径：入门 → 三大基本功 → 进阶调色 → 每周实操挑战。跟着学就能出片。</div>
+                    </div>
+                </div>
+
+                <!-- 顶部筛选与刷新 -->
+                <div class="video-edit-filter-bar">
+                    <div class="video-edit-tabs">
+                        <button class="ve-tab active" data-cat="all">全部</button>
+                        <button class="ve-tab" data-cat="vlog">🎥 Vlog</button>
+                        <button class="ve-tab" data-cat="trend">💥 爆点</button>
+                        <button class="ve-tab" data-cat="beginner">🌱 入门</button>
+                        <button class="ve-tab" data-cat="technique">✨ 技巧</button>
+                    </div>
+                    <button class="ve-refresh-btn" id="veRefreshBtn">🔄 刷新推荐</button>
+                </div>
+
+                <!-- 我的学习任务入口 -->
+                <div class="video-my-tasks" id="videoMyTasks" style="display:none;">
+                    <div class="video-tasks-header">
+                        <span>⭐ 我的任务</span>
+                        <span id="videoTasksCount">0</span>
+                    </div>
+                    <div class="video-tasks-list" id="videoTasksList"></div>
+                </div>
+
+                <!-- 教程列表 -->
+                <div class="video-tutorials" id="videoTutorials"></div>
+
+                <!-- 教程详情弹窗 -->
+                <div class="ve-detail-overlay" id="veDetailOverlay" style="display:none;">
+                    <div class="ve-detail-content" id="veDetailContent"></div>
+                </div>
+            </section>
+
+            <!-- 内容复盘 -->
+            <section class="panel" id="panel-review">
+                <div class="panel-header">
+                    <h2>📊 内容复盘</h2>
+                </div>
+
+                <!-- 今日复盘表单 -->
+                <div class="review-card">
+                    <div class="review-form-title" id="reviewFormTitle">7月26日复盘</div>
+                    <div class="review-form">
+                        <input type="text" id="reviewTitle" placeholder="发布内容标题/链接" maxlength="100">
+                        <div class="review-input-box">
+                            <div class="review-input-label">✅ 优点：哪些做得好？数据如何？</div>
+                            <textarea id="reviewPros" placeholder="" rows="4"></textarea>
+                        </div>
+                        <div class="review-input-box">
+                            <div class="review-input-label">❌ 缺点：哪里不足？掉粉？互动低？</div>
+                            <textarea id="reviewCons" placeholder="" rows="4"></textarea>
+                        </div>
+                        <div class="review-input-box">
+                            <div class="review-input-label">🔄 优化方向：下次怎么改进？</div>
+                            <textarea id="reviewImprove" placeholder="" rows="4"></textarea>
+                        </div>
+                        <input type="date" id="reviewDate" style="display:none;">
+                        <button id="saveReviewBtn">保存复盘</button>
+                    </div>
+                </div>
+
+                <!-- 历史复盘 -->
+                <div class="review-history">
+                    <div class="review-history-title">📚 历史复盘</div>
+                    <div class="review-list" id="reviewList"></div>
+                </div>
+            </section>
+
+            <!-- 工作日程 -->
+            <section class="panel" id="panel-schedule">
+                <div class="panel-header">
+                    <h2>📅 工作日程</h2>
+                    <div class="schedule-view-tabs">
+                        <button class="view-tab active" data-view="month">月视图</button>
+                        <button class="view-tab" data-view="year">年视图</button>
+                    </div>
+                </div>
+                <div class="schedule-nav">
+                    <button id="schedulePrev">◀</button>
+                    <span id="scheduleTitle"></span>
+                    <button id="scheduleNext">▶</button>
+                </div>
+                <div class="schedule-add-row">
+                    <input type="text" id="scheduleInput" placeholder="添加日程..." maxlength="100">
+                    <input type="date" id="scheduleDate">
+                    <input type="time" id="scheduleTime">
+                    <div class="schedule-color-picker">
+                        <span>标记颜色：</span>
+                        <button class="color-dot active" data-color="#333" style="background:#333;"></button>
+                        <button class="color-dot" data-color="#FF6B8A" style="background:#FF6B8A;"></button>
+                        <button class="color-dot" data-color="#7E57C2" style="background:#7E57C2;"></button>
+                        <button class="color-dot" data-color="#42A5F5" style="background:#42A5F5;"></button>
+                        <button class="color-dot" data-color="#66BB6A" style="background:#66BB6A;"></button>
+                        <button class="color-dot" data-color="#FFA726" style="background:#FFA726;"></button>
+                    </div>
+                    <button id="addScheduleBtn">➕ 添加</button>
+                </div>
+                <div id="scheduleContent"></div>
+
+                <!-- 本月总结 -->
+                <div class="month-summary" id="monthSummary" style="display:none;">
+                    <div class="month-summary-title">📝 本月总结</div>
+                    <textarea id="monthSummaryInput" placeholder="总结本月工作、收获与计划..." rows="4" maxlength="500"></textarea>
+                    <button id="saveMonthSummaryBtn">💾 保存总结</button>
+                    <div class="month-summary-date" id="monthSummaryDate"></div>
+                </div>
+            </section>
+
+            <!-- 英语学习 -->
+            <section class="panel" id="panel-english">
+                <div class="panel-header">
+                    <h2>🇬🇧 英语学习</h2>
+                    <span class="english-timer-label">⏱️ 今日目标：30分钟</span>
+                </div>
+                <div class="english-dashboard">
+                    <div class="timer-section">
+                        <div class="timer-display" id="englishTimer">00:00</div>
+                        <div class="timer-controls">
+                            <button id="timerStartBtn">▶ 开始</button>
+                            <button id="timerPauseBtn">⏸ 暂停</button>
+                            <button id="timerResetBtn">↺ 重置</button>
+                        </div>
+                        <div class="timer-progress">
+                            <div class="progress-bar">
+                                <div class="progress-fill english-fill" id="englishFill" style="width: 0%"></div>
+                            </div>
+                            <div class="progress-text" id="englishProgress">今日已学 0 / 30 分钟</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="english-tabs">
+                    <button class="eng-tab active" data-mode="quiz">🎯 闯关答题</button>
+                    <button class="eng-tab" data-mode="speak">🎤 跟读练习</button>
+                    <button class="eng-tab" data-mode="mistakes">📕 错题合集</button>
+                </div>
+                <div class="english-content" id="englishContent"></div>
+            </section>
+
+            <!-- 每日新闻 -->
+            <section class="panel" id="panel-news">
+                <div class="panel-header">
+                    <h2>📰 每日新闻</h2>
+                    <button class="btn-refresh-news" id="refreshNewsBtn">🔄 刷新</button>
+                </div>
+                <div class="news-loading" id="newsLoading">加载中...</div>
+                <div class="news-list" id="newsList"></div>
+            </section>
+
+            <!-- 备忘录 -->
+                        <!-- 备忘录 -->
+            <section class="panel" id="panel-memo">
+                <div class="panel-header">
+                    <h2>📝 备忘录</h2>
+                </div>
+                <div class="memo-input-group">
+                    <div class="memo-input-meta">
+                        <input type="date" id="memoDate" class="memo-date-input">
+                        <label class="memo-image-label">
+                            <input type="file" id="memoImage" accept="image/*" class="memo-image-input">
+                            <span>📷 插入图片</span>
+                        </label>
+                    </div>
+                    <div class="memo-image-preview" id="memoImagePreview" style="display:none;"></div>
+                    <textarea id="memoInput" placeholder="随手记点东西..." maxlength="1000" rows="4"></textarea>
+                    <button id="saveMemoBtn">💾 保存</button>
+                </div>
+                <div class="memo-list" id="memoList"></div>
+
+                <!-- 心情日记 -->
+                <div class="mood-diary-section">
+                    <div class="mood-diary-banner">
+                        <div class="mood-diary-icon">💭</div>
+                        <div class="mood-diary-info">
+                            <div class="mood-diary-title">心情日记</div>
+                            <div class="mood-diary-desc">这里只属于你。记下当下的感受、今天的收获、甚至焦虑——写下来，它们就不再是模糊的沉重。</div>
+                        </div>
+                    </div>
+
+                    <div class="mood-diary-form">
+                        <div class="mood-diary-date">
+                            <span>🌟 今天，我</span>
+                            <span id="moodDiaryDateDisplay">2026-07-24</span>
+                        </div>
+
+                        <div class="mood-diary-row">
+                            <span class="mood-diary-label">天气</span>
+                            <div class="mood-weather-options" id="moodWeatherOptions"></div>
+                        </div>
+
+                        <div class="mood-diary-row">
+                            <span class="mood-diary-label">心情</span>
+                            <div class="mood-mood-options" id="moodMoodOptions"></div>
+                        </div>
+
+                        <textarea id="moodDiaryInput" placeholder="今天的状态、收获、感想，或者只是想说的话..." rows="4"></textarea>
+                        <input type="text" id="moodDiaryProgress" placeholder="🌱 今日一件微小进步（可选，刻意看见当下）" maxlength="100">
+                        <button id="saveMoodDiaryBtn" class="mood-diary-save-btn">记下来</button>
+                    </div>
+
+                    <div class="mood-diary-list" id="moodDiaryList"></div>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <!-- 日程编辑弹窗 -->
+    <div class="modal-overlay" id="scheduleEditModal" style="display:none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>✏️ 编辑日程</h3>
+                <button class="modal-close" id="closeScheduleEditModal">✕</button>
+            </div>
+            <input type="hidden" id="editScheduleId">
+            <div class="edit-form">
+                <input type="text" id="editScheduleText" placeholder="日程内容" maxlength="100">
+                <input type="date" id="editScheduleDate">
+                <input type="time" id="editScheduleTime">
+                <div class="edit-actions">
+                    <button id="saveScheduleEditBtn">保存</button>
+                    <button id="deleteScheduleBtn" class="btn-danger">删除</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 自定义Emoji弹窗 -->
+    <div class="modal-overlay" id="emojiModal" style="display:none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>🎨 自定义导航图标</h3>
+                <button class="modal-close" id="closeEmojiModal">✕</button>
+            </div>
+            <div class="emoji-grid" id="emojiGrid"></div>
+            <div class="emoji-custom-input">
+                <input type="text" id="customEmojiInput" placeholder="输入自定义emoji..." maxlength="2">
+                <button id="applyEmojiBtn">应用</button>
+            </div>
+            <p class="emoji-hint">选择要修改的导航项，然后点击emoji或输入自定义图标</p>
+        </div>
+    </div>
+
+    <!-- Toast提示 -->
+    <div class="toast" id="toast"></div>
+
+    <!-- 遮罩层 -->
+    <div class="overlay" id="overlay" style="display:none;"></div>
+
+    <script>
+        // 注册 Service Worker
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js').catch(() => {});
+        }
+    </script>
+    <script src="js/app.js?v=3"></script>
+
+    <!-- 数据备份与恢复弹窗 -->
+    <div class="modal-overlay" id="backupModal" style="display:none;">
+        <div class="modal-content backup-modal-content">
+            <div class="modal-header">
+                <h3>💾 数据备份与恢复</h3>
+                <button class="modal-close" id="closeBackupModal">✕</button>
+            </div>
+            <div class="backup-body">
+                <div class="backup-section">
+                    <div class="backup-title">📤 导出所有数据</div>
+                    <p class="backup-desc">把所有数据保存到本地，换手机或重新安装时可以恢复。</p>
+                    <button id="exportDataBtn" class="backup-btn-primary">导出 JSON 备份</button>
+                    <button id="copyDataBtn" class="backup-btn-secondary" style="margin-top:8px;">复制备份数据（推荐）</button>
+                </div>
+                <div class="backup-section">
+                    <div class="backup-title">📥 导入数据</div>
+                    <p class="backup-desc">选择之前导出的 JSON 备份文件，恢复所有数据。</p>
+                    <label class="backup-file-label">
+                        <input type="file" id="importDataFile" accept=".json" class="backup-file-input">
+                        <span>选择备份文件</span>
+                    </label>
+                </div>
+                <div class="backup-warning">
+                    ⚠️ 导入会覆盖当前所有数据，建议先导出一份当前备份。
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

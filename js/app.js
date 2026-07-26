@@ -1,0 +1,3256 @@
+// ========== 崽崽工作台 - 主应用 ==========
+
+const APP = {
+    currentPanel: 'daily-plan',
+    currentNavEdit: null,
+    scheduleView: 'month',
+    scheduleDate: new Date(),
+    englishMode: 'quiz',
+    currentPlatform: 'douyin',
+    currentFilter: 'all',
+    quizIndex: 0,
+    quizCorrect: 0,
+    speakIndex: 0,
+    englishSeconds: 0,
+    englishTimer: null,
+    emojiData: null,
+};
+
+// ========== 导航配置 ==========
+const DEFAULT_NAV = [
+    { id: 'daily-plan', emoji: '📋', label: '每日计划' },
+    { id: 'schedule', emoji: '📅', label: '工作日程' },
+    { id: 'savings', emoji: '💰', label: '存钱计划' },
+    { id: 'stocks', emoji: '📈', label: '股票基金' },
+    { id: 'inspiration', emoji: '💡', label: '选题灵感' },
+    { id: 'hot-trends', emoji: '🔥', label: '爆款热点' },
+    { id: 'video-edit', emoji: '🎬', label: '视频剪辑' },
+    { id: 'review', emoji: '📝', label: '内容复盘' },
+    { id: 'english', emoji: '🇬🇧', label: '英语学习' },
+    { id: 'news', emoji: '📰', label: '每日新闻' },
+    { id: 'memo', emoji: '📝', label: '备忘录' },
+];
+
+// ========== 初始化 ==========
+document.addEventListener('DOMContentLoaded', () => {
+    initNavigation();
+    initDate();
+    initWeather();
+    initSidebar();
+    initUserInfo();
+    initAvatar();
+    initGlobalSearch();
+    initPanelSearch();
+    initDailyPlan();
+    initSavings();
+    initStocks();
+    initInspiration();
+    initHotTrends();
+    initVideoEdit();
+    initReview();
+    initSchedule();
+    initEnglish();
+    initNews();
+    initMemo();
+    initBackupRestore();
+    initEmojiModal();
+    initResponsive();
+});
+
+// ========== 工具函数 ==========
+function $(sel) { return document.querySelector(sel); }
+function $$(sel) { return document.querySelectorAll(sel); }
+
+function getData(key, def = null) {
+    try { const d = localStorage.getItem('zz_' + key); return d ? JSON.parse(d) : def; }
+    catch { return def; }
+}
+
+function setData(key, val) {
+    localStorage.setItem('zz_' + key, JSON.stringify(val));
+}
+
+function showToast(msg) {
+    const t = $('#toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(t._timeout);
+    t._timeout = setTimeout(() => t.classList.remove('show'), 2000);
+}
+// ========== 行情数据服务 ==========
+// 使用腾讯财经接口（支持 CORS）获取股票/ETF 实时行情与历史 K 线
+// 场外基金使用天天基金 JSONP 接口获取历史净值
+
+function normalizeStockCode(code, type) {
+    code = String(code).trim().toLowerCase();
+    // 移除已有的前缀
+    code = code.replace(/^(sh|sz|bj|hk)/, '');
+    if (type === 'fund') {
+        // 场内基金：ETF/LOF 代码一般以 15/16/18/50/51/52/56/58/16 开头
+        if (/^(15|16|18|50|51|52|56|58)/.test(code)) return { market: 'tencent', symbol: 'sh' + code };
+        if (/^(15|16|18)/.test(code)) return { market: 'tencent', symbol: 'sz' + code };
+        // 其他视为场外基金，走天天基金
+        return { market: 'fund', symbol: code };
+    }
+    // 股票
+    if (/^6/.test(code) || /^68/.test(code) || /^8/.test(code) || /^9/.test(code)) {
+        return { market: 'tencent', symbol: 'sh' + code };
+    }
+    if (/^(0|3|2)/.test(code) || /^4/.test(code)) {
+        return { market: 'tencent', symbol: 'sz' + code };
+    }
+    // 默认深圳
+    return { market: 'tencent', symbol: 'sz' + code };
+}
+
+function formatDateStr(d) {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+function getQuoteCache(symbol) {
+    return getData('quote_' + symbol, null);
+}
+
+function setQuoteCache(symbol, data) {
+    setData('quote_' + symbol, data);
+}
+
+// 批量获取腾讯实时行情（GBK 编码）
+async function fetchTencentQuotes(symbols) {
+    const url = 'https://qt.gtimg.cn/q=' + symbols.join(',');
+    try {
+        const res = await fetch(url);
+        const buffer = await res.arrayBuffer();
+        const decoder = new TextDecoder('gbk');
+        const text = decoder.decode(buffer);
+        const lines = text.trim().split('\n');
+        const result = {};
+        lines.forEach(line => {
+            const m = line.match(/v_(.+?)="(.+?)";?$/);
+            if (!m) return;
+            const symbol = m[1];
+            const parts = m[2].split('~');
+            // parts[1] 名称, parts[2] 代码, parts[3] 当前价, parts[4] 昨收, parts[5] 今开
+            result[symbol] = {
+                name: parts[1] || '',
+                code: parts[2] || symbol,
+                price: parseFloat(parts[3]) || 0,
+                prevClose: parseFloat(parts[4]) || 0,
+                open: parseFloat(parts[5]) || 0,
+                high: parseFloat(parts[33]) || 0,
+                low: parseFloat(parts[34]) || 0,
+                time: parts[30] || ''
+            };
+        });
+        return result;
+    } catch (e) {
+        console.error('fetchTencentQuotes error', e);
+        return {};
+    }
+}
+
+// 获取腾讯历史 K 线（JSON，已除权）
+async function fetchTencentKline(symbol, start, end) {
+    // 一次最多 640 根，通常够用
+    const url = `https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${symbol},day,${start},${end},640,qfq`;
+    try {
+        const res = await fetch(url);
+        const json = await res.json();
+        const data = json.data && json.data[symbol];
+        if (!data) return [];
+        const arr = data.qfqday || data.day || [];
+        return arr.map(item => ({
+            date: item[0],
+            open: parseFloat(item[1]),
+            close: parseFloat(item[2]),
+            low: parseFloat(item[3]),
+            high: parseFloat(item[4]),
+            volume: parseFloat(item[5])
+        }));
+    } catch (e) {
+        console.error('fetchTencentKline error', e);
+        return [];
+    }
+}
+
+// JSONP 加载天天基金历史净值
+function loadFundJsonp(code) {
+    return new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        const cbName = '_fund_callback_' + Date.now();
+        script.src = `https://fund.eastmoney.com/pingzhongdata/${code}.js?v=${Date.now()}`;
+        script.onload = () => {
+            document.body.removeChild(script);
+            const trend = window.Data_netWorthTrend;
+            const acWorth = window.Data_ACWorthTrend;
+            if (!trend) return reject(new Error('无净值数据'));
+            const list = trend.map((item, idx) => ({
+                date: formatDateStr(new Date(item.x)),
+                nav: item.y,
+                equityReturn: item.equityReturn,
+                acNav: acWorth && acWorth[idx] ? acWorth[idx][1] : null
+            }));
+            resolve(list);
+        };
+        script.onerror = () => {
+            document.body.removeChild(script);
+            reject(new Error('加载失败'));
+        };
+        document.body.appendChild(script);
+    });
+}
+
+// 获取或更新某持仓的历史行情
+async function updateHoldingQuotes(holding) {
+    const norm = normalizeStockCode(holding.code, holding.type);
+    holding.symbol = norm.symbol;
+    holding.market = norm.market;
+
+    const today = new Date();
+    const startDate = new Date(holding.createdAt);
+    startDate.setDate(startDate.getDate() - 5); // 多取前几天用于计算
+    const start = formatDateStr(startDate);
+    const end = formatDateStr(today);
+
+    let cache = getQuoteCache(norm.symbol) || { list: [], updatedAt: 0 };
+
+    if (norm.market === 'tencent') {
+        // 合并实时行情和历史 K 线
+        const [quotes, kline] = await Promise.all([
+            fetchTencentQuotes([norm.symbol]),
+            fetchTencentKline(norm.symbol, start, end)
+        ]);
+        const q = quotes[norm.symbol];
+        if (q && q.price > 0) {
+            holding.price = q.price;
+            holding.name = q.name || holding.name;
+        }
+        if (kline && kline.length > 0) {
+            cache.list = mergeQuoteList(cache.list, kline, 'date');
+        }
+    } else if (norm.market === 'fund') {
+        const list = await loadFundJsonp(norm.symbol);
+        if (list && list.length > 0) {
+            cache.list = mergeQuoteList(cache.list, list, 'date');
+            const last = list[list.length - 1];
+            if (last && last.nav > 0) {
+                holding.price = last.nav;
+            }
+        }
+    }
+
+    cache.updatedAt = Date.now();
+    setQuoteCache(norm.symbol, cache);
+    return cache;
+}
+
+function mergeQuoteList(oldList, newList, key) {
+    const map = {};
+    (oldList || []).forEach(item => { map[item[key]] = item; });
+    newList.forEach(item => { map[item[key]] = item; });
+    return Object.values(map).sort((a, b) => a[key].localeCompare(b[key]));
+}
+
+// 从缓存获取某日收盘价/净值
+function getClosePrice(symbol, dateStr) {
+    const cache = getQuoteCache(symbol);
+    if (!cache || !cache.list) return null;
+    const item = cache.list.find(x => x.date === dateStr);
+    return item ? (item.close || item.nav) : null;
+}
+
+// 判断某日期是否可能是休市日（非周末但无行情数据）
+function isMarketClosed(date, symbol) {
+    const dow = date.getDay();
+    if (dow === 0 || dow === 6) return true;
+    const dateStr = formatDateStr(date);
+    const price = getClosePrice(symbol, dateStr);
+    if (price === null) return true; // 无数据视为休市/节假日
+    return false;
+}
+
+
+function formatDate(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const week = ['日', '一', '二', '三', '四', '五', '六'];
+    return `${y}年${m}月${day}日 星期${week[d.getDay()]}`;
+}
+
+function formatDateShort(d) {
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${m}/${day}`;
+}
+
+// ========== 日期显示 ==========
+function initDate() {
+    const update = () => {
+        $('#dateDisplay').textContent = formatDate(new Date());
+        $('#dailyPlanDate').textContent = formatDate(new Date());
+        const m = new Date();
+        $('#savingsMonth').textContent = `${m.getFullYear()}年${m.getMonth()+1}月`;
+    };
+    update();
+    setInterval(update, 60000);
+}
+
+// ========== 天气 ==========
+async function initWeather() {
+    try {
+        // 尝试获取用户位置并获取天气
+        const pos = await new Promise((resolve, reject) => {
+            if (!navigator.geolocation) return reject('no geolocation');
+            navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 5000 });
+        });
+        const { latitude, longitude } = pos.coords;
+        // 使用 Open-Meteo 免费天气API
+        const resp = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current_weather=true&timezone=auto`);
+        const data = await resp.json();
+        if (data.current_weather) {
+            const temp = Math.round(data.current_weather.temperature);
+            const code = data.current_weather.weathercode;
+            const weatherMap = {
+                0: { icon: '☀️', desc: '晴天' },
+                1: { icon: '🌤️', desc: '少云' },
+                2: { icon: '⛅', desc: '多云' },
+                3: { icon: '☁️', desc: '阴天' },
+                45: { icon: '🌫️', desc: '雾' },
+                48: { icon: '🌫️', desc: '雾凇' },
+                51: { icon: '🌦️', desc: '小雨' },
+                53: { icon: '🌦️', desc: '中雨' },
+                55: { icon: '🌧️', desc: '大雨' },
+                61: { icon: '🌧️', desc: '小雨' },
+                63: { icon: '🌧️', desc: '中雨' },
+                65: { icon: '🌧️', desc: '大雨' },
+                71: { icon: '🌨️', desc: '小雪' },
+                73: { icon: '🌨️', desc: '中雪' },
+                75: { icon: '❄️', desc: '大雪' },
+                80: { icon: '🌦️', desc: '阵雨' },
+                81: { icon: '🌧️', desc: '阵雨' },
+                82: { icon: '⛈️', desc: '雷阵雨' },
+                95: { icon: '⛈️', desc: '雷暴' },
+            };
+            const w = weatherMap[code] || { icon: '🌤️', desc: '多云' };
+            $('#weatherDisplay').innerHTML = `<span class="weather-icon">${w.icon}</span><span class="weather-temp">${temp}°C</span><span class="weather-desc">${w.desc}</span>`;
+            setData('weather', { temp, icon: w.icon, desc: w.desc, time: Date.now() });
+        }
+    } catch {
+        // 使用缓存或默认
+        const cached = getData('weather');
+        if (cached && (Date.now() - cached.time < 3600000)) {
+            $('#weatherDisplay').innerHTML = `<span class="weather-icon">${cached.icon}</span><span class="weather-temp">${cached.temp}°C</span><span class="weather-desc">${cached.desc}</span>`;
+        } else {
+            $('#weatherDisplay').innerHTML = `<span class="weather-icon">☀️</span><span class="weather-temp">28°C</span><span class="weather-desc">晴朗</span>`;
+        }
+    }
+}
+
+// ========== 侧边栏 ==========
+function initSidebar() {
+    const menuBtn = $('#menuBtn');
+    const sidebar = $('#sidebar');
+    const overlay = $('#overlay');
+    const toggle = $('#sidebarToggle');
+
+    menuBtn.addEventListener('click', () => {
+        sidebar.classList.add('open');
+        overlay.style.display = 'block';
+    });
+
+    toggle.addEventListener('click', closeSidebar);
+    overlay.addEventListener('click', closeSidebar);
+
+    function closeSidebar() {
+        sidebar.classList.remove('open');
+        overlay.style.display = 'none';
+    }
+}
+
+// ========== 导航系统 ==========
+function initNavigation() {
+    let navData = getData('nav', DEFAULT_NAV);
+
+    // 如果默认导航新增了模块，自动合并更新（保留用户自定义的emoji）
+    const missing = DEFAULT_NAV.find(def => !navData.some(n => n.id === def.id));
+    if (missing) {
+        navData = DEFAULT_NAV.map(def => {
+            const existing = navData.find(n => n.id === def.id);
+            return existing || def;
+        });
+        setData('nav', navData);
+    }
+
+    APP.emojiData = navData;
+    renderNav();
+
+    // 恢复上次面板
+    const lastPanel = getData('lastPanel', 'daily-plan');
+    // 如果上次面板不存在于当前导航，回到每日计划
+    const validPanel = APP.emojiData.some(n => n.id === lastPanel) ? lastPanel : 'daily-plan';
+    switchPanel(validPanel);
+}
+
+function renderNav() {
+    const nav = $('#sidebarNav');
+    nav.innerHTML = APP.emojiData.map(item => `
+        <button class="nav-item${APP.currentPanel === item.id ? ' active' : ''}" data-panel="${item.id}">
+            <span class="nav-emoji" data-nav-id="${item.id}">${item.emoji}</span>
+            <span class="nav-label">${item.label}</span>
+        </button>
+    `).join('');
+
+    nav.querySelectorAll('.nav-item').forEach(btn => {
+        btn.addEventListener('click', () => {
+            switchPanel(btn.dataset.panel);
+            if (window.innerWidth <= 768) {
+                $('#sidebar').classList.remove('open');
+                $('#overlay').style.display = 'none';
+            }
+        });
+    });
+}
+
+function switchPanel(panelId) {
+    APP.currentPanel = panelId;
+    setData('lastPanel', panelId);
+
+    $$('.panel').forEach(p => p.classList.remove('active'));
+    const panel = $(`#panel-${panelId}`);
+    if (panel) panel.classList.add('active');
+
+    $$('.nav-item').forEach(n => n.classList.remove('active'));
+    const navItem = document.querySelector(`[data-panel="${panelId}"]`);
+    if (navItem) navItem.classList.add('active');
+
+    // 清除搜索
+    $('#panelSearchInput').value = '';
+    $('#globalSearchInput').value = '';
+    $('#searchResults').style.display = 'none';
+
+    // 切换到对应面板时刷新
+    if (panelId === 'daily-plan') renderTasks(getData('tasks', []));
+    if (panelId === 'schedule') renderSchedule();
+    if (panelId === 'stocks') {
+        renderHoldings();
+        renderProfitCalendar();
+        renderRecords();
+    }
+    if (panelId === 'english') renderEnglishContent();
+    if (panelId === 'news') loadNews();
+    if (panelId === 'savings') updateSavingsDisplay();
+}
+
+// ========== 用户信息 ==========
+function initUserInfo() {
+    const role = getData('userRole', '自媒体创作者');
+    const sig = getData('userSignature', '每天进步一点点✨');
+    $('#userRole').textContent = role;
+    $('#userSignature').textContent = sig;
+
+    $('#userRole').addEventListener('input', () => {
+        setData('userRole', $('#userRole').textContent.trim() || '自媒体创作者');
+    });
+
+    $('#userSignature').addEventListener('input', (e) => {
+        const text = e.target.textContent;
+        if (text.length > 20) {
+            e.target.textContent = text.slice(0, 20);
+            // 将光标移到末尾
+            const sel = window.getSelection();
+            const range = document.createRange();
+            range.selectNodeContents(e.target);
+            range.collapse(false);
+            sel.removeAllRanges();
+            sel.addRange(range);
+        }
+        setData('userSignature', e.target.textContent.trim() || '每天进步一点点✨');
+    });
+}
+
+// ========== 用户头像 ==========
+function initAvatar() {
+    const avatarData = getData('userAvatar', '');
+    if (avatarData) {
+        const avatar = $('#userAvatar');
+        avatar.innerHTML = `<img src="${avatarData}" alt="头像">`;
+    }
+
+    $('#userAvatarWrapper').addEventListener('click', () => {
+        $('#avatarFileInput').click();
+    });
+
+    $('#avatarFileInput').addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        if (file.size > 2 * 1024 * 1024) {
+            showToast('图片不能超过2MB');
+            return;
+        }
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            const dataUrl = ev.target.result;
+            setData('userAvatar', dataUrl);
+            $('#userAvatar').innerHTML = `<img src="${dataUrl}" alt="头像">`;
+            showToast('头像已更新');
+        };
+        reader.readAsDataURL(file);
+    });
+}
+
+// ========== 全局搜索 ==========
+function initGlobalSearch() {
+    const input = $('#globalSearchInput');
+    const results = $('#searchResults');
+    let debounceTimer;
+
+    input.addEventListener('input', () => {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+            const query = input.value.trim().toLowerCase();
+            if (query.length < 1) {
+                results.style.display = 'none';
+                return;
+            }
+            const items = performSearch(query);
+            if (items.length === 0) {
+                results.innerHTML = '<div style="padding:14px;text-align:center;color:#ccc;">未找到匹配结果</div>';
+            } else {
+                results.innerHTML = items.map(item => `
+                    <div class="search-result-item" data-panel="${item.panel}" data-id="${item.id || ''}">
+                        <span class="result-emoji">${item.emoji}</span>
+                        <span class="result-text">${escapeHtml(item.text)}</span>
+                        <span class="result-module">${item.module}</span>
+                    </div>
+                `).join('');
+            }
+            results.style.display = 'block';
+        }, 200);
+    });
+
+    input.addEventListener('focus', () => {
+        if (input.value.trim().length >= 1) {
+            results.style.display = 'block';
+        }
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.global-search')) {
+            results.style.display = 'none';
+        }
+    });
+
+    results.addEventListener('click', (e) => {
+        const item = e.target.closest('.search-result-item');
+        if (item) {
+            const panel = item.dataset.panel;
+            switchPanel(panel);
+            input.value = '';
+            results.style.display = 'none';
+            // 如果有点击项的高亮需求可以在这里扩展
+        }
+    });
+}
+
+function performSearch(query) {
+    const results = [];
+
+    // 搜索每日计划任务
+    const tasks = getData('tasks', []);
+    tasks.forEach(t => {
+        if (t.text.toLowerCase().includes(query)) {
+            results.push({ emoji: '📋', text: t.text, module: '每日计划', panel: 'daily-plan' });
+        }
+    });
+
+    // 搜索日程
+    const schedules = getData('schedules', []);
+    schedules.forEach(s => {
+        if (s.text.toLowerCase().includes(query)) {
+            results.push({ emoji: '📅', text: s.text, module: '工作日程', panel: 'schedule' });
+        }
+    });
+
+    // 搜索灵感
+    const inspirations = getData('inspirations', []);
+    inspirations.forEach(ins => {
+        if (ins.text.toLowerCase().includes(query)) {
+            results.push({ emoji: '💡', text: ins.text.substring(0, 50), module: '选题灵感', panel: 'inspiration' });
+        }
+    });
+
+    // 搜索备忘录
+    const memos = getData('memos', []);
+    memos.forEach(m => {
+        if (m.text.toLowerCase().includes(query)) {
+            results.push({ emoji: '📝', text: m.text.substring(0, 50), module: '备忘录', panel: 'memo' });
+        }
+    });
+
+    // 搜索复盘
+    const reviews = getData('reviews', []);
+    reviews.forEach(r => {
+        if (r.title.toLowerCase().includes(query)) {
+            results.push({ emoji: '📝', text: r.title, module: '内容复盘', panel: 'review' });
+        }
+    });
+
+    // 搜索导航项
+    APP.emojiData.forEach(nav => {
+        if (nav.label.toLowerCase().includes(query)) {
+            results.push({ emoji: nav.emoji, text: nav.label, module: '功能模块', panel: nav.id });
+        }
+    });
+
+    return results.slice(0, 15);
+}
+
+// ========== 面板内搜索 ==========
+function initPanelSearch() {
+    const input = $('#panelSearchInput');
+    let debounceTimer;
+
+    input.addEventListener('input', () => {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+            const query = input.value.trim().toLowerCase();
+            // 在当前每日计划面板中过滤任务
+            const tasks = getData('tasks', []);
+            if (query.length >= 1) {
+                const filtered = tasks.filter(t => t.text.toLowerCase().includes(query));
+                renderTasks(filtered);
+            } else {
+                renderTasks(tasks);
+            }
+        }, 200);
+    });
+
+    // 快捷跳转到今日日程（月视图）
+    $('#quickJumpSchedule').addEventListener('click', () => {
+        APP.scheduleView = 'month';
+        APP.scheduleDate = new Date();
+        switchPanel('schedule');
+    });
+}
+
+// ========== 每日计划 ==========
+function initDailyPlan() {
+    const tasks = getData('tasks', []);
+    renderTasks(tasks);
+
+    $('#addTaskBtn').addEventListener('click', () => {
+        const input = $('#newTaskInput');
+        const text = input.value.trim();
+        if (!text) return showToast('请输入任务内容');
+        tasks.push({ id: Date.now(), text, done: false });
+        setData('tasks', tasks);
+        renderTasks(tasks);
+        input.value = '';
+        input.focus();
+    });
+
+    $('#newTaskInput').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') $('#addTaskBtn').click();
+    });
+}
+
+function renderTasks(tasks) {
+    const list = $('#taskList');
+    if (tasks.length === 0) {
+        list.innerHTML = '<div style="text-align:center;padding:30px;color:#ccc;">还没有任务，快来添加吧~</div>';
+    } else {
+        list.innerHTML = tasks.map((t, i) => `
+            <li class="task-item">
+                <div class="task-checkbox${t.done ? ' checked' : ''}" data-index="${i}"></div>
+                <span class="task-text${t.done ? ' done' : ''}">${escapeHtml(t.text)}</span>
+                <button class="task-delete" data-index="${i}">🗑️</button>
+            </li>
+        `).join('');
+    }
+
+    // Checkbox
+    list.querySelectorAll('.task-checkbox').forEach(cb => {
+        cb.addEventListener('click', () => {
+            const i = parseInt(cb.dataset.index);
+            tasks[i].done = !tasks[i].done;
+            setData('tasks', tasks);
+            renderTasks(tasks);
+        });
+    });
+
+    // Delete
+    list.querySelectorAll('.task-delete').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const i = parseInt(btn.dataset.index);
+            tasks.splice(i, 1);
+            setData('tasks', tasks);
+            renderTasks(tasks);
+            showToast('任务已删除');
+        });
+    });
+
+    // Progress
+    const done = tasks.filter(t => t.done).length;
+    const total = tasks.length;
+    $('#taskProgress').textContent = total > 0 ? `已完成 ${done}/${total}` : '';
+}
+
+// ========== 存钱计划 ==========
+function initSavings() {
+    const budget = getData('dailyBudget', 0);
+    const goal = getData('monthlyGoal', 0);
+    $('#dailyBudget').value = budget || '';
+    $('#monthlyGoalInput').value = goal || '';
+    $('#transDate').value = new Date().toISOString().split('T')[0];
+
+    updateSavingsDisplay();
+
+    $('#setBudgetBtn').addEventListener('click', () => {
+        const val = parseFloat($('#dailyBudget').value) || 0;
+        setData('dailyBudget', val);
+        updateSavingsDisplay();
+        showToast('预算已设置');
+    });
+
+    $('#setGoalBtn').addEventListener('click', () => {
+        const val = parseFloat($('#monthlyGoalInput').value) || 0;
+        setData('monthlyGoal', val);
+        updateSavingsDisplay();
+        showToast('存钱目标已设置');
+    });
+
+    $('#addSaveBtn').addEventListener('click', () => {
+        const amount = parseFloat($('#saveAmountInput').value);
+        if (!amount || amount <= 0) return showToast('请输入存入金额');
+        const transactions = getData('transactions', []);
+        const today = new Date().toISOString().split('T')[0];
+        transactions.unshift({
+            id: Date.now(),
+            amount,
+            type: 'save',
+            category: '存款',
+            note: '存入存钱罐',
+            date: today
+        });
+        setData('transactions', transactions);
+        $('#saveAmountInput').value = '';
+        updateSavingsDisplay();
+        showToast('已存入一笔');
+    });
+
+    $('#addTransBtn').addEventListener('click', addTransaction);
+
+    // 根据收支类型联动分类
+    $('#transType').addEventListener('change', () => {
+        updateTransCategories();
+        $('#transCategory').style.display = 'block';
+        $('#customCategory').style.display = 'none';
+    });
+    updateTransCategories();
+
+    // 选择自定义时，select隐藏，input在同一位置显示
+    $('#transCategory').addEventListener('change', () => {
+        if ($('#transCategory').value === '自定义') {
+            $('#transCategory').style.display = 'none';
+            $('#customCategory').style.display = 'block';
+            $('#customCategory').focus();
+        }
+    });
+
+    // 输入框失焦时如果没输入内容，恢复select
+    $('#customCategory').addEventListener('blur', () => {
+        if (!$('#customCategory').value.trim()) {
+            $('#customCategory').style.display = 'none';
+            $('#transCategory').style.display = 'block';
+            $('#transCategory').value = '餐饮';
+        }
+    });
+}
+
+const BASE_EXPENSE_CATEGORIES = ['餐饮', '交通', '购物', '娱乐', '居住', '其他'];
+const BASE_INCOME_CATEGORIES = ['工资', '兼职', '理财', '其他'];
+
+function updateTransCategories() {
+    const type = $('#transType').value;
+    const baseCats = type === 'expense' ? BASE_EXPENSE_CATEGORIES : BASE_INCOME_CATEGORIES;
+    const customKey = type === 'expense' ? 'customExpenseCategories' : 'customIncomeCategories';
+    const customCats = getData(customKey, []);
+    const select = $('#transCategory');
+    select.innerHTML = [
+        ...baseCats.map(c => `<option value="${c}">${c}</option>`),
+        ...customCats.map(c => `<option value="${c}">${c}</option>`),
+        '<option value="自定义">✏️ 自定义</option>'
+    ].join('');
+    select.style.display = 'block';
+    $('#customCategory').style.display = 'none';
+    $('#customCategory').value = '';
+}
+
+function addTransaction() {
+    const amount = parseFloat($('#transAmount').value);
+    if (!amount || amount <= 0) return showToast('请输入金额');
+    const type = $('#transType').value;
+
+    // 判断是select还是input在显示
+    let category;
+    if ($('#customCategory').style.display === 'block') {
+        category = $('#customCategory').value.trim();
+        if (!category) return showToast('请输入分类名称');
+        // 保存自定义分类
+        const key = type === 'expense' ? 'customExpenseCategories' : 'customIncomeCategories';
+        const list = getData(key, []);
+        if (!list.includes(category)) {
+            list.push(category);
+            setData(key, list);
+        }
+    } else {
+        category = $('#transCategory').value;
+        if (category === '自定义') return showToast('请输入自定义分类名称');
+    }
+
+    const note = $('#transNote').value.trim() || category;
+    const date = $('#transDate').value || new Date().toISOString().split('T')[0];
+
+    const transactions = getData('transactions', []);
+    transactions.unshift({ id: Date.now(), amount, type, category, note, date });
+    setData('transactions', transactions);
+
+    $('#transAmount').value = '';
+    $('#transNote').value = '';
+    updateTransCategories();
+    updateSavingsDisplay();
+    showToast('已记录');
+}
+
+function updateSavingsDisplay() {
+    const budget = getData('dailyBudget', 0);
+    const monthlyGoal = getData('monthlyGoal', 0);
+    const transactions = getData('transactions', []);
+    const today = new Date().toISOString().split('T')[0];
+    const now = new Date();
+    const monthStart = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+
+    // 今日统计
+    const todayExpense = transactions
+        .filter(t => t.date === today && t.type === 'expense')
+        .reduce((s, t) => s + t.amount, 0);
+    const todayIncome = transactions
+        .filter(t => t.date === today && t.type === 'income')
+        .reduce((s, t) => s + t.amount, 0);
+
+    // 本月统计
+    const monthIncome = transactions
+        .filter(t => t.date.startsWith(monthStart) && t.type === 'income')
+        .reduce((s, t) => s + t.amount, 0);
+    const monthExpense = transactions
+        .filter(t => t.date.startsWith(monthStart) && t.type === 'expense')
+        .reduce((s, t) => s + t.amount, 0);
+    const monthSaved = Math.max(0, monthIncome - monthExpense);
+
+    // 四宫格概览
+    $('#overviewBudget').textContent = `¥${budget.toFixed(0)}`;
+    $('#overviewSpent').textContent = `¥${todayExpense.toFixed(0)}`;
+    $('#overviewIncome').textContent = `¥${todayIncome.toFixed(0)}`;
+    $('#overviewSaved').textContent = `¥${monthSaved.toFixed(0)}`;
+
+    // 预算进度
+    const budgetPct = budget > 0 ? Math.min(100, (todayExpense / budget) * 100) : 0;
+    $('#budgetFill').style.width = budgetPct + '%';
+    $('#budgetPercent').textContent = `${budgetPct.toFixed(0)}%`;
+
+    // 存钱目标进度
+    const goalPct = monthlyGoal > 0 ? Math.min(100, (monthSaved / monthlyGoal) * 100) : 0;
+    $('#goalFill').style.width = goalPct + '%';
+    $('#goalText').textContent = `本月已存 ¥${monthSaved.toFixed(0)} / 目标 ¥${monthlyGoal.toFixed(0)}`;
+    $('#goalPercent').textContent = `${goalPct.toFixed(0)}%`;
+
+    // 交易列表
+    renderTransactions(transactions.slice(0, 30));
+}
+
+function renderTransactions(transactions) {
+    const list = $('#transactionList');
+    if (transactions.length === 0) {
+        list.innerHTML = '<div style="text-align:center;padding:20px;color:#ccc;">暂无收支记录</div>';
+        return;
+    }
+    list.innerHTML = transactions.map(t => `
+        <div class="trans-item">
+            <div>
+                <div>${escapeHtml(t.note)}</div>
+                <div class="trans-category">${escapeHtml(t.date)} · ${escapeHtml(t.category || (t.type === 'income' ? '收入' : '支出'))}</div>
+            </div>
+            <span class="amount ${t.type}">${t.type === 'expense' ? '-' : (t.type === 'save' ? '+' : '+')}¥${t.amount.toFixed(2)}</span>
+        </div>
+    `).join('');
+}
+
+// ========== 股票基金 ==========
+APP.stockTab = 'holdings';
+APP.profitPeriod = 'day';
+APP.profitDate = new Date();
+APP.profitSelectedDate = new Date(); // 选中的日期/月份/年份
+
+function initStocks() {
+    // 默认日期
+    $('#recordDate').value = new Date().toISOString().slice(0, 10);
+
+    // Tab切换
+    $$('.stock-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            $$('.stock-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            APP.stockTab = tab.dataset.tab;
+            $$('.stock-panel').forEach(p => p.classList.remove('active'));
+            $('#stockPanel-' + APP.stockTab).classList.add('active');
+
+            if (APP.stockTab === 'holdings') renderHoldings();
+            if (APP.stockTab === 'profit') renderProfitCalendar();
+            if (APP.stockTab === 'records') {
+                updateRecordHoldingOptions();
+                renderRecords();
+            }
+        });
+    });
+
+    // 添加持仓表单
+    $('#addHoldingBtn').addEventListener('click', () => {
+        const form = $('#addHoldingForm');
+        form.style.display = form.style.display === 'none' ? 'flex' : 'none';
+    });
+
+    $('#cancelHoldingBtn').addEventListener('click', () => {
+        $('#addHoldingForm').style.display = 'none';
+        clearHoldingForm();
+    });
+
+    $('#confirmHoldingBtn').addEventListener('click', async () => {
+        const type = $('#holdingType').value;
+        const code = $('#holdingCode').value.trim();
+        const name = $('#holdingName').value.trim();
+        const shares = parseFloat($('#holdingShares').value);
+        const cost = parseFloat($('#holdingCost').value);
+        let price = parseFloat($('#holdingPrice').value);
+        if (!code || !name) return showToast('请输入代码和名称');
+        if (!shares || shares <= 0) return showToast('请输入有效的持仓数量');
+        if (!cost || cost <= 0) return showToast('请输入有效的成本价');
+
+        const norm = normalizeStockCode(code, type);
+        let fetchedName = name;
+        if (!price || price <= 0) {
+            showToast('正在获取当前行情...');
+            try {
+                const quotes = await fetchTencentQuotes([norm.symbol]);
+                const q = quotes[norm.symbol];
+                if (q && q.price > 0) {
+                    price = q.price;
+                    fetchedName = q.name || name;
+                }
+            } catch (e) {}
+        }
+        if (!price || price <= 0) return showToast('请输入有效的当前价，或检查网络后重试');
+
+        const holdings = getData('holdings', []);
+        const newHolding = {
+            id: Date.now(),
+            type, code, name: fetchedName, shares, cost, price,
+            symbol: norm.symbol,
+            market: norm.market,
+            createdAt: Date.now()
+        };
+        holdings.push(newHolding);
+        setData('holdings', holdings);
+        updateHoldingQuotes(newHolding).then(() => {
+            renderProfitCalendar();
+        }).catch(() => {});
+        renderHoldings();
+        $('#addHoldingForm').style.display = 'none';
+        clearHoldingForm();
+        showToast('持仓已添加，正在拉取行情');
+    });
+
+    // 收益明细 - 周期切换
+    $$('.profit-period').forEach(btn => {
+        btn.addEventListener('click', () => {
+            $$('.profit-period').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            APP.profitPeriod = btn.dataset.period;
+            APP.profitDate = new Date();
+            APP.profitSelectedDate = new Date();
+            renderProfitCalendar();
+        });
+    });
+
+    // 收益明细 - 前后导航
+    $('#profitPrev').addEventListener('click', () => {
+        navigateProfit(-1);
+    });
+    $('#profitNext').addEventListener('click', () => {
+        navigateProfit(1);
+    });
+
+    // 交易记录
+    $('#addRecordBtn').addEventListener('click', () => {
+        const type = $('#recordType').value;
+        const holdingId = parseInt($('#recordHolding').value);
+        const shares = parseFloat($('#recordShares').value);
+        const price = parseFloat($('#recordPrice').value);
+        const date = $('#recordDate').value;
+        if (!holdingId) return showToast('请选择持仓');
+        if (!shares || shares <= 0) return showToast('请输入有效数量');
+        if (!price || price <= 0) return showToast('请输入有效价格');
+        if (!date) return showToast('请选择日期');
+
+        const records = getData('records', []);
+        records.push({
+            id: Date.now(),
+            type, holdingId, shares, price, date,
+            createdAt: Date.now()
+        });
+        setData('records', records);
+
+        // 如果是买入，更新持仓数量和成本
+        const holdings = getData('holdings', []);
+        const h = holdings.find(h => h.id === holdingId);
+        if (h) {
+            if (type === 'buy') {
+                const totalCost = h.shares * h.cost + shares * price;
+                h.shares += shares;
+                h.cost = totalCost / h.shares;
+            } else if (type === 'sell') {
+                h.shares = Math.max(0, h.shares - shares);
+            }
+            setData('holdings', holdings);
+            renderHoldings();
+        }
+
+        renderRecords();
+        $('#recordShares').value = '';
+        $('#recordPrice').value = '';
+        showToast('交易已记录');
+    });
+
+    // 刷新行情按钮
+    $('#refreshQuotesBtn').addEventListener('click', async () => {
+        const btn = $('#refreshQuotesBtn');
+        const status = $('#quoteStatus');
+        btn.disabled = true;
+        status.textContent = '正在刷新行情...';
+        await refreshAllHoldingsQuotes();
+        status.textContent = '行情已更新 ' + new Date().toLocaleTimeString();
+        btn.disabled = false;
+    });
+
+    // 初始化各视图
+    renderHoldings();
+    renderProfitCalendar();
+    updateRecordHoldingOptions();
+    renderRecords();
+
+    // 首次加载自动刷新行情
+    setTimeout(() => {
+        refreshAllHoldingsQuotes();
+    }, 1000);
+}
+
+function clearHoldingForm() {
+    $('#holdingCode').value = '';
+    $('#holdingName').value = '';
+    $('#holdingShares').value = '';
+    $('#holdingCost').value = '';
+    $('#holdingPrice').value = '';
+}
+
+// ---- 持仓汇总 ----
+function calcHoldingSummary(holdings) {
+    let totalMarketValue = 0;
+    let totalCost = 0;
+    let totalProfit = 0;
+    holdings.forEach(h => {
+        totalMarketValue += h.shares * h.price;
+        totalCost += h.shares * h.cost;
+        totalProfit += h.shares * (h.price - h.cost);
+    });
+    return { totalMarketValue, totalProfit, todayProfit: totalProfit };
+}
+
+function renderHoldings() {
+    const holdings = getData('holdings', []);
+    const summary = calcHoldingSummary(holdings);
+
+    $('#totalMarketValue').textContent = '¥' + summary.totalMarketValue.toFixed(2);
+    const profitEl = $('#totalProfit');
+    profitEl.textContent = (summary.totalProfit >= 0 ? '+' : '') + '¥' + summary.totalProfit.toFixed(2);
+    profitEl.className = 'summary-value ' + (summary.totalProfit >= 0 ? 'profit-up' : 'profit-down');
+
+    const todayEl = $('#todayProfit');
+    todayEl.textContent = (summary.todayProfit >= 0 ? '+' : '') + '¥' + summary.todayProfit.toFixed(2);
+    todayEl.className = 'summary-value ' + (summary.todayProfit >= 0 ? 'profit-up' : 'profit-down');
+
+    const list = $('#holdingList');
+    if (holdings.length === 0) {
+        list.innerHTML = '<div style="text-align:center;padding:30px;color:#ccc;">点击上方按钮添加持仓</div>';
+        return;
+    }
+
+    list.innerHTML = holdings.map(h => {
+        const marketValue = h.shares * h.price;
+        const profit = marketValue - h.shares * h.cost;
+        const profitPct = h.cost > 0 ? ((h.price - h.cost) / h.cost * 100) : 0;
+        const isUp = profit >= 0;
+        const typeLabel = h.type === 'fund' ? '基金' : '股票';
+        return `
+            <div class="holding-item">
+                <div class="holding-main">
+                    <div class="holding-header">
+                        <span class="holding-name">${escapeHtml(h.name)}</span>
+                        <span class="holding-type ${h.type}">${typeLabel}</span>
+                    </div>
+                    <div class="holding-code">${escapeHtml(h.code)}</div>
+                    <div class="holding-stats">
+                        <div class="stat-item">
+                            <span class="stat-label">持仓</span>
+                            <span class="stat-value">${h.shares}</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">成本</span>
+                            <span class="stat-value">${h.cost.toFixed(4)}</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">现价</span>
+                            <span class="stat-value current-price" data-id="${h.id}" contenteditable="true">${h.price.toFixed(4)}</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">市值</span>
+                            <span class="stat-value">¥${marketValue.toFixed(2)}</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="holding-right">
+                    <div class="holding-profit ${isUp ? 'profit-up' : 'profit-down'}">
+                        ${isUp ? '+' : ''}¥${profit.toFixed(2)}
+                    </div>
+                    <div class="holding-profit-pct ${isUp ? 'profit-up' : 'profit-down'}">
+                        ${isUp ? '+' : ''}${profitPct.toFixed(2)}%
+                    </div>
+                    <button class="holding-delete" data-id="${h.id}">🗑️</button>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    // 编辑当前价
+    list.querySelectorAll('.current-price').forEach(el => {
+        el.addEventListener('blur', () => {
+            const id = parseInt(el.dataset.id);
+            const newPrice = parseFloat(el.textContent.trim());
+            if (!newPrice || newPrice <= 0) {
+                showToast('请输入有效价格');
+                renderHoldings();
+                return;
+            }
+            const holdings = getData('holdings', []);
+            const h = holdings.find(h => h.id === id);
+            if (h) {
+                h.price = newPrice;
+                setData('holdings', holdings);
+                renderHoldings();
+                showToast('价格已更新');
+            }
+        });
+        el.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                el.blur();
+            }
+        });
+    });
+
+    // 删除持仓
+    list.querySelectorAll('.holding-delete').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const id = parseInt(btn.dataset.id);
+            const holdings = getData('holdings', []);
+            const updated = holdings.filter(h => h.id !== id);
+            setData('holdings', updated);
+            renderHoldings();
+            showToast('已删除');
+        });
+    });
+}
+
+// ---- 收益明细 ----
+function navigateProfit(dir) {
+    const d = APP.profitDate;
+    if (APP.profitPeriod === 'day') {
+        d.setMonth(d.getMonth() + dir);
+    } else if (APP.profitPeriod === 'month') {
+        d.setFullYear(d.getFullYear() + dir);
+    } else {
+        d.setFullYear(d.getFullYear() + dir);
+    }
+    renderProfitCalendar();
+}
+
+// 刷新所有持仓行情
+async function refreshAllHoldingsQuotes() {
+    const holdings = getData('holdings', []);
+    if (holdings.length === 0) return;
+    const status = $('#quoteStatus');
+    if (status) status.textContent = '正在刷新行情...';
+    // 补全旧数据
+    let changed = false;
+    holdings.forEach(h => {
+        if (!h.symbol) {
+            const norm = normalizeStockCode(h.code, h.type);
+            h.symbol = norm.symbol;
+            h.market = norm.market;
+            changed = true;
+        }
+    });
+    if (changed) setData('holdings', holdings);
+
+    // 逐个刷新，避免并发过多
+    for (const h of holdings) {
+        try {
+            await updateHoldingQuotes(h);
+        } catch (e) {
+            console.error('refresh quote failed', h.code, e);
+        }
+    }
+    renderHoldings();
+    renderProfitCalendar();
+    if (status) status.textContent = '行情已更新 ' + new Date().toLocaleTimeString();
+}
+
+function renderProfitCalendar() {
+    let holdings = getData('holdings', []);
+    const period = APP.profitPeriod;
+    const d = APP.profitDate;
+    const titleEl = $('#profitTitle');
+    const calendarEl = $('#profitCalendar');
+    const detailTitleEl = $('#profitDetailTitle');
+    const detailTotalEl = $('#profitDetailTotal');
+    const detailListEl = $('#profitDetailList');
+
+    // 兼容旧数据：补全 symbol/market
+    let migrated = false;
+    holdings = holdings.map(h => {
+        if (!h.symbol) {
+            migrated = true;
+            const norm = normalizeStockCode(h.code, h.type);
+            return { ...h, symbol: norm.symbol, market: norm.market };
+        }
+        return h;
+    });
+    if (migrated) setData('holdings', holdings);
+
+    if (holdings.length === 0) {
+        titleEl.textContent = '';
+        calendarEl.innerHTML = '<div style="text-align:center;padding:30px;color:#ccc;">添加持仓后查看收益明细</div>';
+        detailTitleEl.textContent = '收益明细';
+        detailTotalEl.textContent = '¥0.00';
+        detailListEl.innerHTML = '';
+        return;
+    }
+
+    if (period === 'day') {
+        const year = d.getFullYear();
+        const month = d.getMonth();
+        titleEl.textContent = `${year}年${month + 1}月`;
+        renderDayCalendar(year, month, holdings, calendarEl);
+        // 默认选中今天或当月第一天
+        const today = new Date();
+        const selectedDay = (year === today.getFullYear() && month === today.getMonth()) ? today.getDate() : 1;
+        renderProfitDetail('day', year, month, selectedDay, holdings, detailTitleEl, detailTotalEl, detailListEl);
+    } else if (period === 'month') {
+        const year = d.getFullYear();
+        titleEl.textContent = `${year}年`;
+        renderMonthCalendar(year, holdings, calendarEl);
+        renderProfitDetail('month', year, null, null, holdings, detailTitleEl, detailTotalEl, detailListEl);
+    } else {
+        titleEl.textContent = '历年收益';
+        renderYearCalendar(holdings, calendarEl);
+        renderProfitDetail('year', null, null, null, holdings, detailTitleEl, detailTotalEl, detailListEl);
+    }
+}
+
+function getDailyProfit(holding, year, month, day) {
+    const date = new Date(year, month, day);
+    const dow = date.getDay();
+    const dateStr = formatDateStr(date);
+
+    // 买入日期判断
+    let buyDayStart = null;
+    if (holding.createdAt) {
+        const buyDate = new Date(holding.createdAt);
+        buyDayStart = new Date(buyDate.getFullYear(), buyDate.getMonth(), buyDate.getDate());
+        const thisDayStart = new Date(year, month, day);
+        if (thisDayStart < buyDayStart) return { value: 0, status: 'before' };
+    }
+
+    // 周末休市
+    if (dow === 0 || dow === 6) return { value: 0, status: 'weekend' };
+
+    // 无行情数据视为休市/节假日
+    const symbol = holding.symbol || normalizeStockCode(holding.code, holding.type).symbol;
+    const price = getClosePrice(symbol, dateStr);
+    if (price === null) return { value: 0, status: 'nodata' };
+
+    // 判断是否是买入当天
+    const thisDayStart = new Date(year, month, day);
+    const isBuyDay = buyDayStart && thisDayStart.getTime() === buyDayStart.getTime();
+
+    let prevPrice = null;
+    if (isBuyDay) {
+        // 买入当天用成本价作为基准
+        prevPrice = holding.cost;
+    } else {
+        // 获取前一日收盘价
+        const prevDate = new Date(date);
+        prevDate.setDate(prevDate.getDate() - 1);
+        // 向前查找最近一个交易日
+        for (let i = 0; i < 10; i++) {
+            const pd = new Date(prevDate);
+            pd.setDate(pd.getDate() - i);
+            const p = getClosePrice(symbol, formatDateStr(pd));
+            if (p !== null) { prevPrice = p; break; }
+        }
+    }
+
+    if (prevPrice === null) {
+        prevPrice = holding.cost;
+    }
+
+    const change = holding.shares * (price - prevPrice);
+    return { value: change, status: 'ok' };
+}
+
+function renderDayCalendar(year, month, holdings, calendarEl) {
+    const firstDay = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const today = new Date();
+    const isCurrentMonth = (year === today.getFullYear() && month === today.getMonth());
+    const weekDays = ['日', '一', '二', '三', '四', '五', '六'];
+
+    let html = '<div class="profit-calendar-grid">';
+    weekDays.forEach(w => {
+        html += `<div class="profit-week-day">${w}</div>`;
+    });
+    for (let i = 0; i < firstDay; i++) {
+        html += '<div class="profit-day empty"></div>';
+    }
+    for (let day = 1; day <= daysInMonth; day++) {
+        const dateObj = new Date(year, month, day);
+        const dow = dateObj.getDay();
+        const isWeekend = (dow === 0 || dow === 6);
+        let dayProfit = 0;
+        let hasNodata = false;
+        let hasBefore = false;
+        holdings.forEach(h => {
+            const r = getDailyProfit(h, year, month, day);
+            dayProfit += r.value;
+            if (r.status === 'nodata') hasNodata = true;
+            if (r.status === 'before') hasBefore = true;
+        });
+        const isToday = isCurrentMonth && day === today.getDate();
+        let cellClass = 'profit-day';
+        let cellContent;
+        if (isWeekend) {
+            cellClass += ' weekend';
+            cellContent = `<div class="profit-day-num">${day}</div><div class="profit-day-val rest">休</div>`;
+        } else if (hasNodata && !hasBefore) {
+            cellClass += ' nodata';
+            cellContent = `<div class="profit-day-num">${day}</div><div class="profit-day-val rest">—</div>`;
+        } else {
+            const isUp = dayProfit >= 0;
+            cellClass += isUp ? ' up' : ' down';
+            const profitText = (isUp ? '+' : '') + dayProfit.toFixed(0);
+            cellContent = `<div class="profit-day-num">${day}</div><div class="profit-day-val">${profitText}</div>`;
+        }
+        if (isToday) cellClass += ' today';
+        html += `<div class="${cellClass}" data-year="${year}" data-month="${month}" data-day="${day}" data-weekend="${isWeekend ? 1 : 0}">${cellContent}</div>`;
+    }
+    html += '</div>';
+    calendarEl.innerHTML = html;
+
+    calendarEl.querySelectorAll('.profit-day:not(.empty)').forEach(el => {
+        el.addEventListener('click', () => {
+            const y = parseInt(el.dataset.year);
+            const m = parseInt(el.dataset.month);
+            const day = parseInt(el.dataset.day);
+            calendarEl.querySelectorAll('.profit-day').forEach(d => d.classList.remove('selected'));
+            el.classList.add('selected');
+            const holdings = getData('holdings', []);
+            renderProfitDetail('day', y, m, day, holdings, $('#profitDetailTitle'), $('#profitDetailTotal'), $('#profitDetailList'));
+        });
+    });
+}
+
+function getMonthlyProfit(holding, year, month) {
+    let total = 0;
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    for (let day = 1; day <= daysInMonth; day++) {
+        total += getDailyProfit(holding, year, month, day).value;
+    }
+    return total;
+}
+
+function renderMonthCalendar(year, holdings, calendarEl) {
+    const today = new Date();
+    let html = '<div class="profit-month-grid">';
+    for (let month = 0; month < 12; month++) {
+        let monthProfit = 0;
+        holdings.forEach(h => { monthProfit += getMonthlyProfit(h, year, month); });
+        const isUp = monthProfit >= 0;
+        const isCurrentMonth = (year === today.getFullYear() && month === today.getMonth());
+        const profitText = (isUp ? '+' : '') + monthProfit.toFixed(0);
+        html += `
+            <div class="profit-month-cell ${isUp ? 'up' : 'down'} ${isCurrentMonth ? 'current' : ''}" data-year="${year}" data-month="${month}">
+                <div class="profit-month-label">${month + 1}月</div>
+                <div class="profit-month-val">${profitText}</div>
+            </div>
+        `;
+    }
+    html += '</div>';
+    calendarEl.innerHTML = html;
+}
+
+function getYearlyProfit(holding, year) {
+    let total = 0;
+    for (let month = 0; month < 12; month++) {
+        total += getMonthlyProfit(holding, year, month);
+    }
+    return total;
+}
+
+function renderYearCalendar(holdings, calendarEl) {
+    const today = new Date();
+    const currentYear = today.getFullYear();
+    const years = [];
+    for (let y = currentYear; y >= currentYear - 4; y--) {
+        years.push(y);
+    }
+    let html = '<div class="profit-year-grid">';
+    years.forEach(year => {
+        let yearProfit = 0;
+        holdings.forEach(h => { yearProfit += getYearlyProfit(h, year); });
+        const isUp = yearProfit >= 0;
+        const profitText = (isUp ? '+' : '') + yearProfit.toFixed(2);
+        html += `
+            <div class="profit-year-cell ${isUp ? 'up' : 'down'} ${year === currentYear ? 'current' : ''}">
+                <div class="profit-year-label">${year}年</div>
+                <div class="profit-year-val">${profitText}</div>
+            </div>
+        `;
+    });
+    html += '</div>';
+    calendarEl.innerHTML = html;
+}
+
+function renderProfitDetail(period, year, month, day, holdings, titleEl, totalEl, listEl) {
+    let title = '';
+    let total = 0;
+    const details = [];
+
+    if (period === 'day') {
+        const dateObj = new Date(year, month, day);
+        const dow = dateObj.getDay();
+        const isWeekend = (dow === 0 || dow === 6);
+        title = `${year}年${month + 1}月${day}日 收益明细` + (isWeekend ? '（休市）' : '');
+        holdings.forEach(h => {
+            const r = getDailyProfit(h, year, month, day);
+            const buyDate = h.createdAt ? new Date(h.createdAt) : null;
+            const buyDayStart = buyDate ? new Date(buyDate.getFullYear(), buyDate.getMonth(), buyDate.getDate()) : null;
+            const thisDayStart = new Date(year, month, day);
+            let note = '';
+            if (isWeekend) note = '休市';
+            else if (buyDayStart && thisDayStart < buyDayStart) note = '未持仓';
+            else if (r.status === 'nodata') note = '无行情';
+            total += r.value;
+            details.push({ name: h.name, code: h.code, type: h.type, profit: r.value, note });
+        });
+    } else if (period === 'month') {
+        title = `${year}年${month + 1}月 收益明细`;
+        holdings.forEach(h => {
+            const mProfit = getMonthlyProfit(h, year, month);
+            total += mProfit;
+            details.push({ name: h.name, code: h.code, type: h.type, profit: mProfit, note: '' });
+        });
+    } else {
+        title = '历年总收益明细';
+        const today = new Date();
+        holdings.forEach(h => {
+            let yProfit = 0;
+            for (let y = today.getFullYear(); y >= today.getFullYear() - 4; y--) {
+                yProfit += getYearlyProfit(h, y);
+            }
+            total += yProfit;
+            details.push({ name: h.name, code: h.code, type: h.type, profit: yProfit, note: '' });
+        });
+    }
+
+    titleEl.textContent = title;
+    totalEl.textContent = (total >= 0 ? '+' : '') + '¥' + total.toFixed(2);
+    totalEl.className = total >= 0 ? 'profit-up' : 'profit-down';
+
+    if (details.length === 0) {
+        listEl.innerHTML = '<div style="text-align:center;padding:20px;color:#ccc;">暂无持仓数据</div>';
+        return;
+    }
+
+    details.sort((a, b) => Math.abs(b.profit) - Math.abs(a.profit));
+
+    listEl.innerHTML = details.map(d => {
+        const isUp = d.profit >= 0;
+        const typeLabel = d.type === 'fund' ? '基金' : '股票';
+        const noteHtml = d.note ? `<span class="profit-detail-note">${d.note}</span>` : '';
+        const showDash = d.note && d.note !== '';
+        const valHtml = showDash
+            ? `<span class="profit-detail-val" style="color:#999;">—</span>`
+            : `<span class="profit-detail-val ${isUp ? 'profit-up' : 'profit-down'}">${isUp ? '+' : ''}¥${d.profit.toFixed(2)}</span>`;
+        return `
+            <div class="profit-detail-item">
+                <div class="profit-detail-info">
+                    <span class="profit-detail-name">${escapeHtml(d.name)}</span>
+                    <span class="profit-detail-code">${escapeHtml(d.code)} · ${typeLabel}${noteHtml ? ' ' + noteHtml : ''}</span>
+                </div>
+                ${valHtml}
+            </div>
+        `;
+    }).join('');
+}
+
+// ---- 交易记录 ----
+function updateRecordHoldingOptions() {
+    const holdings = getData('holdings', []);
+    const select = $('#recordHolding');
+    if (holdings.length === 0) {
+        select.innerHTML = '<option value="">请先添加持仓</option>';
+    } else {
+        select.innerHTML = holdings.map(h =>
+            `<option value="${h.id}">${escapeHtml(h.name)} (${escapeHtml(h.code)})</option>`
+        ).join('');
+    }
+}
+
+function renderRecords() {
+    const records = getData('records', []);
+    const holdings = getData('holdings', []);
+    const list = $('#recordList');
+
+    if (records.length === 0) {
+        list.innerHTML = '<div style="text-align:center;padding:20px;color:#ccc;">暂无交易记录</div>';
+        return;
+    }
+
+    // 按日期降序
+    records.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    list.innerHTML = records.map(r => {
+        const h = holdings.find(h => h.id === r.holdingId);
+        const name = h ? h.name : '已删除持仓';
+        const code = h ? h.code : '--';
+        const typeLabel = r.type === 'buy' ? '买入' : '卖出';
+        const typeClass = r.type === 'buy' ? 'record-buy' : 'record-sell';
+        const amount = r.shares * r.price;
+        return `
+            <div class="record-item">
+                <div class="record-item-left">
+                    <span class="record-type ${typeClass}">${typeLabel}</span>
+                    <div class="record-info">
+                        <span class="record-name">${escapeHtml(name)}</span>
+                        <span class="record-meta">${escapeHtml(code)} · ${r.shares}份 @ ¥${r.price.toFixed(4)}</span>
+                    </div>
+                </div>
+                <div class="record-item-right">
+                    <div class="record-amount">¥${amount.toFixed(2)}</div>
+                    <div class="record-date">${r.date}</div>
+                </div>
+                <button class="record-delete" data-id="${r.id}">🗑️</button>
+            </div>
+        `;
+    }).join('');
+
+    list.querySelectorAll('.record-delete').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const id = parseInt(btn.dataset.id);
+            const records = getData('records', []);
+            const updated = records.filter(r => r.id !== id);
+            setData('records', updated);
+            renderRecords();
+            showToast('已删除记录');
+        });
+    });
+}
+
+// ========== 选题灵感 ==========
+function initInspiration() {
+    const inspirations = getData('inspirations', []);
+    renderInspirations(inspirations);
+
+    // Tag selection
+    let selectedTags = [];
+    $$('#panel-inspiration .tag').forEach(tag => {
+        tag.addEventListener('click', () => {
+            const t = tag.dataset.tag;
+            if (selectedTags.includes(t)) {
+                selectedTags = selectedTags.filter(s => s !== t);
+                tag.classList.remove('selected');
+            } else {
+                selectedTags.push(t);
+                tag.classList.add('selected');
+            }
+        });
+    });
+
+    $('#saveInspirationBtn').addEventListener('click', () => {
+        const text = $('#inspirationInput').value.trim();
+        if (!text) return showToast('请输入灵感内容');
+        const inspirations = getData('inspirations', []);
+        inspirations.unshift({
+            id: Date.now(),
+            text,
+            tags: [...selectedTags],
+            date: new Date().toISOString().split('T')[0]
+        });
+        setData('inspirations', inspirations);
+        renderInspirations(inspirations);
+        $('#inspirationInput').value = '';
+        selectedTags = [];
+        $$('#panel-inspiration .tag').forEach(t => t.classList.remove('selected'));
+        showToast('灵感已保存');
+    });
+}
+
+function renderInspirations(inspirations) {
+    const list = $('#inspirationList');
+    if (inspirations.length === 0) {
+        list.innerHTML = '<div style="text-align:center;padding:30px;color:#ccc;">还没有灵感，快来记录吧~</div>';
+        return;
+    }
+    list.innerHTML = inspirations.map(ins => `
+        <div class="inspiration-item">
+            <div class="insp-content">${escapeHtml(ins.text)}</div>
+            <div class="insp-meta">
+                <div class="insp-tags">
+                    ${(ins.tags || []).map(t => `<span class="tag">${escapeHtml(t)}</span>`).join('')}
+                </div>
+                <span>${ins.date}</span>
+                <button class="insp-delete" data-id="${ins.id}">🗑️</button>
+            </div>
+        </div>
+    `).join('');
+
+    list.querySelectorAll('.insp-delete').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const id = parseInt(btn.dataset.id);
+            const inspirations = getData('inspirations', []);
+            setData('inspirations', inspirations.filter(i => i.id !== id));
+            renderInspirations(getData('inspirations', []));
+            showToast('已删除');
+        });
+    });
+}
+
+// ========== 爆款热点 ==========
+const TREND_DATA = {
+    douyin: [
+        { rank: 1, title: '氛围感美妆教程爆火全网', platform: '抖音', hot: '980w', tags: ['美妆'], remake: true, desc: '简约高级感妆容教程，适合日常通勤' },
+        { rank: 2, title: '情侣日常vlog甜蜜暴击', platform: '抖音', hot: '850w', tags: ['vlog', '两性'], remake: true, desc: '记录情侣相处日常，真实感强' },
+        { rank: 3, title: '手势舞挑战新玩法', platform: '抖音', hot: '720w', tags: ['手势舞'], remake: true, desc: '配合热门BGM的手势舞新编排' },
+        { rank: 4, title: '夏天护肤routine分享', platform: '抖音', hot: '680w', tags: ['美妆'], remake: true, desc: '夏季清爽护肤全流程' },
+        { rank: 5, title: '沉浸式晚间vlog', platform: '抖音', hot: '620w', tags: ['vlog'], remake: true, desc: '从下班到入睡的精致日常' },
+        { rank: 6, title: '情侣默契问答挑战', platform: '抖音', hot: '580w', tags: ['两性'], remake: false, desc: '测试情侣默契度' },
+        { rank: 7, title: '国风妆容教程', platform: '抖音', hot: '550w', tags: ['美妆'], remake: true, desc: '新中式妆容搭配汉服造型' },
+        { rank: 8, title: '双人手势舞教学', platform: '抖音', hot: '490w', tags: ['手势舞'], remake: true, desc: '适合情侣/闺蜜合拍' },
+    ],
+    xiaohongshu: [
+        { rank: 1, title: '年度爱用美妆好物合集', platform: '小红书', hot: '12w', tags: ['美妆'], remake: true, desc: '盘点年度回购率最高的产品' },
+        { rank: 2, title: '情侣相处之道：如何有效沟通', platform: '小红书', hot: '9.8w', tags: ['两性'], remake: true, desc: '分享亲密关系中的沟通技巧' },
+        { rank: 3, title: '一周通勤穿搭不重样', platform: '小红书', hot: '8.5w', tags: ['vlog'], remake: true, desc: '职场新人穿搭指南' },
+        { rank: 4, title: '新手化妆避雷指南', platform: '小红书', hot: '7.8w', tags: ['美妆'], remake: true, desc: '化妆小白常见误区盘点' },
+        { rank: 5, title: '周末治愈系vlog', platform: '小红书', hot: '7.2w', tags: ['vlog'], remake: true, desc: '慢节奏生活记录' },
+        { rank: 6, title: '手势舞新手入门教程', platform: '小红书', hot: '6.5w', tags: ['手势舞'], remake: true, desc: '零基础也能学会的手势舞' },
+        { rank: 7, title: '约会妆容灵感', platform: '小红书', hot: '6.0w', tags: ['美妆', '两性'], remake: true, desc: '不同场合的约会妆容推荐' },
+        { rank: 8, title: '独居女生vlog', platform: '小红书', hot: '5.5w', tags: ['vlog'], remake: true, desc: '精致独居生活日常' },
+    ]
+};
+
+function initHotTrends() {
+    // Refresh buttons
+    $$('.trend-refresh-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            APP.currentPlatform = btn.dataset.platform;
+            // 模拟刷新效果：重新打乱热度排序
+            shuffleTrendData();
+            renderTrends();
+            showToast(`${btn.dataset.platform === 'douyin' ? '抖音' : '小红书'}热点已刷新`);
+        });
+    });
+
+    // Filter tags
+    $$('.filter-tag').forEach(tag => {
+        tag.addEventListener('click', () => {
+            $$('.filter-tag').forEach(t => t.classList.remove('active'));
+            tag.classList.add('active');
+            APP.currentFilter = tag.dataset.filter;
+            renderTrends();
+        });
+    });
+
+    renderTrends();
+}
+
+function shuffleTrendData() {
+    // 简单打乱当前平台数据的热度
+    const data = TREND_DATA[APP.currentPlatform] || [];
+    data.forEach(item => {
+        const hotNum = parseFloat(item.hot);
+        const variation = (Math.random() - 0.5) * 0.2;
+        item.hot = Math.max(100, Math.floor(hotNum * (1 + variation))) + (item.hot.includes('万') ? '万' : 'w');
+    });
+    data.sort((a, b) => parseFloat(b.hot) - parseFloat(a.hot));
+    data.forEach((item, idx) => item.rank = idx + 1);
+}
+
+function renderTrends() {
+    const data = TREND_DATA[APP.currentPlatform] || [];
+    let filtered = data;
+    if (APP.currentFilter !== 'all') {
+        filtered = data.filter(item => item.tags.includes(APP.currentFilter));
+    }
+
+    const list = $('#trendList');
+    if (filtered.length === 0) {
+        list.innerHTML = '<div style="text-align:center;padding:30px;color:#ccc;">暂无该领域热点</div>';
+        return;
+    }
+
+    list.innerHTML = filtered.map(item => `
+        <div class="trend-item">
+            <div class="trend-rank">${item.rank}</div>
+            <div class="trend-info">
+                <div class="trend-title-row">
+                    <span class="trend-platform">${escapeHtml(item.platform)}</span>
+                    <span class="trend-title">${escapeHtml(item.title)}</span>
+                </div>
+                <div class="trend-hot">🔥 ${escapeHtml(item.hot)}</div>
+                <div class="trend-tags">
+                    ${item.tags.map(t => `<span class="tag">${escapeHtml(t)}</span>`).join('')}
+                </div>
+                ${item.remake ? '<div class="trend-remake">✅ 适合二创</div>' : ''}
+                <button class="trend-save-btn" data-title="${escapeHtml(item.title)}" data-desc="${escapeHtml(item.desc)}">💡 存为灵感</button>
+            </div>
+        </div>
+    `).join('');
+
+    list.querySelectorAll('.trend-save-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const inspirations = getData('inspirations', []);
+            inspirations.unshift({
+                id: Date.now(),
+                text: `🔥 ${btn.dataset.title} - ${btn.dataset.desc}`,
+                tags: ['热点'],
+                date: new Date().toISOString().split('T')[0]
+            });
+            setData('inspirations', inspirations);
+            showToast('已保存为灵感');
+        });
+    });
+}
+
+// ========== 视频剪辑教程 ==========
+const VIDEO_TUTORIALS = [
+    // Vlog剪辑
+    { id: 1, cat: 'vlog', title: '新手vlog拍摄全流程', desc: '从选题策划到素材拍摄，零基础vlog入门指南，手机就能拍出电影感。', steps: ['确定主题：日常vlog、旅行vlog、美食vlog选一个', '拍摄B-roll素材：多角度多景别，每个镜头3-5秒', '录制A-roll主镜头：对着镜头说话，自然表达', '导入剪映，按时间线排列素材', '添加转场和背景音乐'], tip: '💡 新手建议先拍30秒以内的vlog，熟练后再加长。手机横屏拍摄效果更好。', tools: ['剪映', '手机原相机', '轻颜相机'], toolLabel: '剪映专业版', time: '15分钟', level: '新手', stars: 1, tags: ['剪映', 'vlog', '拍摄'] },
+    { id: 2, cat: 'vlog', title: '剪映一键成片技巧', desc: '利用剪映的图文成片功能，5分钟快速制作高质量vlog视频。', steps: ['打开剪映，点击「图文成片」', '输入文案或粘贴脚本', '选择喜欢的配音音色', 'AI自动匹配画面素材', '手动调整不匹配的片段'], tip: '💡 图文成片适合口播类vlog，画面与声音自动匹配，效率翻倍。', tools: ['剪映'], toolLabel: '剪映专业版', time: '5分钟', level: '新手', stars: 1, tags: ['剪映', '一键成片', '效率'] },
+    { id: 3, cat: 'vlog', title: 'vlog转场特效大全', desc: '10种最常用的vlog转场技巧，让视频衔接更流畅更有质感。', steps: ['遮罩转场：用物体遮挡镜头切换场景', '旋转转场：镜头旋转配合剪辑', '匹配剪辑：相似画面元素衔接', '缩放转场：放大/缩小过渡', '模糊转场：高斯模糊渐隐渐现'], tip: '💡 转场不宜过多，每30秒1-2个转场即可。遮罩转场最容易出片。', tools: ['剪映'], toolLabel: '剪映专业版', time: '20分钟', level: '进阶', stars: 2, tags: ['剪映', '转场', 'vlog'] },
+
+    // 爆点拆解
+    { id: 4, cat: 'trend', title: '爆款视频开头3秒公式', desc: '分析抖音Top100爆款视频，总结出5种让人停下滑动的开头公式。', steps: ['冲突式：「我做了XX，结果...」制造悬念', '反常识：「99%的人不知道...」打破认知', '痛点式：「你是不是也遇到XX问题？」引发共鸣', '数据式：「我用3天测试了XX...」建立信任', '视觉冲击：震撼画面+大字标题直接抓眼球'], tip: '💡 前3秒决定完播率，标题一定要够炸。建议多看同领域爆款模仿。', tools: ['剪映', '抖音数据分析'], toolLabel: '剪映专业版', time: '30分钟', level: '进阶', stars: 2, tags: ['剪映', '爆款', '开头'] },
+    { id: 5, cat: 'trend', title: '爆款BGM节奏卡点教学', desc: '学会卡点剪辑，让画面与音乐节拍完美同步，视频节奏感拉满。', steps: ['选择节奏感强的BGM（鼓点明显）', '导入剪映，打开「自动踩点」', '根据踩点标记切分画面', '每个节拍切换一个镜头', '高潮部分加速剪辑节奏'], tip: '💡 抖音热门BGM每周更新，关注音乐榜单及时跟进。踩点剪辑是爆款基本功。', tools: ['剪映', '抖音热歌榜'], toolLabel: '剪映专业版', time: '25分钟', level: '新手', stars: 1, tags: ['剪映', '卡点', 'BGM'] },
+    { id: 6, cat: 'trend', title: '爆款视频结构拆解', desc: '拆解一条百万点赞视频的完整结构，从开头到结尾逐帧分析。', steps: ['0-3秒：黄金开头，用冲突/问题吸引', '3-8秒：展开问题，放大痛点', '8-15秒：给出解决方案或反转', '15-20秒：展示效果/结果对比', '20秒后：引导互动（点赞关注评论）'], tip: '💡 爆款视频=50%选题+30%开头+20%内容。选题决定上限，开头决定下限。', tools: ['剪映', '飞瓜数据'], toolLabel: '剪映专业版', time: '20分钟', level: '进阶', stars: 2, tags: ['剪映', '爆款', '结构'] },
+
+    // 新手入门
+    { id: 7, cat: 'beginner', title: '剪映新手第一天：认识界面', desc: '剪映完全入门，认识每个功能按钮，5分钟上手剪辑。', steps: ['应用商店搜索「剪映」下载安装', '打开剪映，点击「开始创作」', '认识底部工具栏：剪辑、音频、文本、贴纸等', '认识时间轴：主轨道和画中画轨道', '预览窗口和导出设置'], tip: '💡 剪映完全免费，功能足够日常创作。导出选1080P 30帧即可。', tools: ['剪映'], toolLabel: '剪映专业版', time: '5分钟', level: '新手', stars: 1, tags: ['剪映', '入门', '界面'] },
+    { id: 8, cat: 'beginner', title: '第一个15秒短视频制作', desc: '手把手教你制作第一个短视频，从素材导入到导出发布全流程。', steps: ['导入3-5段手机拍摄素材', '裁剪每段素材到3-5秒', '拖动调整素材顺序', '添加一首背景音乐', '添加字幕和滤镜，导出发布'], tip: '💡 第一个视频不用追求完美，先发出去再说。完成比完美重要！', tools: ['剪映'], toolLabel: '剪映专业版', time: '15分钟', level: '新手', stars: 1, tags: ['剪映', '入门', '实操'] },
+    { id: 9, cat: 'beginner', title: '剪映字幕自动生成', desc: '利用剪映智能字幕功能，一键添加字幕，提高视频完播率。', steps: ['导入视频素材', '点击「文本」→「识别字幕」', '等待AI自动识别语音', '检查并修正识别错误', '调整字幕样式和位置'], tip: '💡 有字幕的视频完播率提升30%以上。字幕颜色建议白字黑边，阅读最清晰。', tools: ['剪映'], toolLabel: '剪映专业版', time: '10分钟', level: '新手', stars: 1, tags: ['剪映', '字幕', '入门'] },
+
+    // 剪辑技巧
+    { id: 10, cat: 'technique', title: '剪映画中画高级玩法', desc: '画中画+混合模式的6种创意用法，让你的视频更有层次感。', steps: ['添加画中画轨道', '调整画中画大小和位置', '尝试「混合模式」：滤色、正片叠底等', '添加画中画入场动画', '配合关键帧做运动效果'], tip: '💡 画中画最适合做反应视频和教程类内容，注意不要遮挡主画面关键信息。', tools: ['剪映'], toolLabel: '剪映专业版', time: '20分钟', level: '进阶', stars: 2, tags: ['剪映', '画中画', '技巧'] },
+    { id: 11, cat: 'technique', title: '关键帧动画完全指南', desc: '学会关键帧，让你的画面动起来！缩放、旋转、位移全搞定。', steps: ['选中素材，点击「关键帧」按钮', '在时间轴不同位置添加多个关键帧', '每个关键帧调整画面位置/大小', '播放预览动画效果', '微调关键帧间距控制速度'], tip: '💡 关键帧是剪辑的分水岭，学会后画面质感直接提升一个档次。', tools: ['剪映'], toolLabel: '剪映专业版', time: '25分钟', level: '进阶', stars: 2, tags: ['剪映', '关键帧', '技巧'] },
+    { id: 12, cat: 'technique', title: '调色教程：一键电影感', desc: '剪映滤镜+手动调色，让你的视频拥有电影级质感。', steps: ['选择合适的滤镜（推荐「富士」「柯达」系列）', '调整亮度+5~10，对比度+3~5', '饱和度-5~10，营造高级感', '添加暗角效果，聚焦画面中心', '锐化+10，让画面更清晰'], tip: '💡 电影感调色的核心是低饱和+暗角+暖色调。多看优秀作品培养色感。', tools: ['剪映'], toolLabel: '剪映专业版', time: '15分钟', level: '进阶', stars: 2, tags: ['剪映', '调色', '技巧'] },
+    { id: 13, cat: 'technique', title: '音频处理：降噪与配音', desc: '视频噪音太多？学会降噪处理和配音录制，声音质量提升10倍。', steps: ['选中音频素材', '点击「降噪」开关一键去噪', '如需配音：点击「音频」→「录音」', '调整音量平衡（背景音乐-15dB）', '添加音效增强氛围感'], tip: '💡 声音质量比画面质量更重要！嘈杂的音频会让观众秒划走。', tools: ['剪映'], toolLabel: '剪映专业版', time: '15分钟', level: '新手', stars: 1, tags: ['剪映', '音频', '降噪'] },
+];
+
+const CAT_LABELS = {
+    vlog: 'Vlog',
+    trend: '爆点拆解',
+    beginner: '新手入门',
+    technique: '剪辑技巧',
+};
+
+const CAT_BADGE_CLASS = {
+    vlog: 'vlog',
+    trend: 'trend',
+    beginner: 'beginner',
+    technique: 'technique',
+};
+
+const CAT_BADGE_TEXT = {
+    vlog: 'Vlog教程',
+    trend: '爆点拆解',
+    beginner: '入门教程',
+    technique: '核心技能',
+};
+
+function getStars(n) {
+    return '⭐'.repeat(n) + '☆'.repeat(Math.max(0, 3 - n));
+}
+
+function initVideoEdit() {
+    APP.veCat = 'all';
+    renderVideoTutorials('all');
+    renderVideoTasks();
+
+    $$('.ve-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            $$('.ve-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            APP.veCat = tab.dataset.cat;
+            renderVideoTutorials(APP.veCat);
+        });
+    });
+
+    // 刷新推荐
+    $('#veRefreshBtn').addEventListener('click', () => {
+        // 打乱顺序重新渲染，模拟每日刷新
+        const today = new Date().toDateString();
+        setData('veRefreshDate', today);
+        showToast('已刷新推荐教程');
+        renderVideoTutorials(APP.veCat);
+    });
+
+    $('#veDetailOverlay').addEventListener('click', (e) => {
+        if (e.target === $('#veDetailOverlay')) {
+            $('#veDetailOverlay').style.display = 'none';
+        }
+    });
+}
+
+function getShuffledTutorials(cat) {
+    let tutorials = VIDEO_TUTORIALS.map((t, idx) => ({ ...t, originalIdx: idx }));
+    if (cat !== 'all') {
+        tutorials = tutorials.filter(t => t.cat === cat);
+    }
+    // 使用日期做种子，让同一天刷新结果一致
+    const date = new Date().toDateString();
+    const seed = Array.from(date).reduce((a, c) => a + c.charCodeAt(0), 0);
+    const shuffled = [...tutorials];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = (seed + i * 37) % (i + 1);
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled;
+}
+
+function isVideoTask(id) {
+    return getData('videoTasks', []).includes(id);
+}
+
+function isVideoLearned(id) {
+    return getData('videoLearned', []).includes(id);
+}
+
+function toggleVideoTask(id) {
+    const tasks = getData('videoTasks', []);
+    const idx = tasks.indexOf(id);
+    if (idx >= 0) {
+        tasks.splice(idx, 1);
+        showToast('已移出任务');
+    } else {
+        tasks.push(id);
+        showToast('已加入任务');
+    }
+    setData('videoTasks', tasks);
+    renderVideoTutorials(APP.veCat);
+    renderVideoTasks();
+}
+
+function markVideoLearned(id) {
+    const learned = getData('videoLearned', []);
+    if (!learned.includes(id)) {
+        learned.push(id);
+        setData('videoLearned', learned);
+        showToast('已标记学习进度');
+        renderVideoTutorials(APP.veCat);
+        renderVideoTasks();
+    }
+}
+
+function renderVideoTasks() {
+    const tasks = getData('videoTasks', []);
+    const learned = getData('videoLearned', []);
+    const box = $('#videoMyTasks');
+    const count = $('#videoTasksCount');
+    const list = $('#videoTasksList');
+
+    if (tasks.length === 0) {
+        box.style.display = 'none';
+        return;
+    }
+
+    box.style.display = 'block';
+    count.textContent = tasks.length;
+
+    const taskItems = tasks.map(id => VIDEO_TUTORIALS.find(t => t.id === id)).filter(Boolean);
+    list.innerHTML = taskItems.map(t => {
+        const done = learned.includes(t.id);
+        return `
+            <div class="video-task-item ${done ? 'done' : ''}">
+                <div class="video-task-title">${escapeHtml(t.title)}</div>
+                <div class="video-task-meta">${done ? '✅ 已完成' : '⏳ 学习中'} · ${t.time}</div>
+                <button class="video-task-remove" data-id="${t.id}">✕</button>
+            </div>
+        `;
+    }).join('');
+
+    list.querySelectorAll('.video-task-remove').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleVideoTask(parseInt(btn.dataset.id));
+        });
+    });
+
+    list.querySelectorAll('.video-task-item').forEach(item => {
+        item.addEventListener('click', () => {
+            const id = parseInt(item.querySelector('.video-task-remove').dataset.id);
+            const t = VIDEO_TUTORIALS.find(x => x.id === id);
+            if (t) showTutorialDetail(t);
+        });
+    });
+}
+
+function renderVideoTutorials(cat) {
+    const tutorials = getShuffledTutorials(cat);
+    const learned = getData('videoLearned', []);
+    const tasks = getData('videoTasks', []);
+    const container = $('#videoTutorials');
+
+    if (tutorials.length === 0) {
+        container.innerHTML = '<div style="text-align:center;padding:30px;color:#ccc;">暂无该分类教程</div>';
+        return;
+    }
+
+    container.innerHTML = tutorials.map((t, idx) => {
+        const isLearned = learned.includes(t.id);
+        const isTask = tasks.includes(t.id);
+        const catBadge = CAT_BADGE_TEXT[t.cat] || CAT_LABELS[t.cat];
+        const catClass = CAT_BADGE_CLASS[t.cat] || t.cat;
+        return `
+            <div class="ve-card ${isLearned ? 'learned' : ''}" data-id="${t.id}">
+                <div class="ve-card-top">
+                    <div class="ve-card-title">${escapeHtml(t.title)}</div>
+                    <span class="ve-card-cat-badge ${catClass}">${catBadge}</span>
+                </div>
+                <div class="ve-card-meta">
+                    <span class="ve-card-tool">🛠️ ${escapeHtml(t.toolLabel)}</span>
+                    <span class="ve-card-time">⏱️ ${t.time}</span>
+                    <span class="ve-card-level">难度 ${getStars(t.stars)}</span>
+                </div>
+                <div class="ve-card-desc">${escapeHtml(t.desc)}</div>
+                <div class="ve-card-actions">
+                    <button class="ve-card-start-btn ${isLearned ? 'learned' : ''}" data-id="${t.id}">
+                        <span class="ve-card-start-icon">🎬</span>
+                        <span class="ve-card-start-text">${isLearned ? '继续学' : '开始学'}</span>
+                    </button>
+                    <button class="ve-card-task-btn ${isTask ? 'active' : ''}" data-id="${t.id}">
+                        <span>${isTask ? '⭐ 已收藏' : '☆ 加入任务'}</span>
+                    </button>
+                </div>
+                <div class="ve-card-tags">
+                    ${t.tags.map(tag => `<span class="ve-card-tag">${escapeHtml(tag)}</span>`).join('')}
+                </div>
+                ${isLearned ? '<div class="ve-card-learned-badge">✅ 已学习</div>' : ''}
+            </div>
+        `;
+    }).join('');
+
+    container.querySelectorAll('.ve-card-start-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const id = parseInt(btn.dataset.id);
+            const t = VIDEO_TUTORIALS.find(x => x.id === id);
+            if (t) showTutorialDetail(t);
+        });
+    });
+
+    container.querySelectorAll('.ve-card-task-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleVideoTask(parseInt(btn.dataset.id));
+        });
+    });
+
+    container.querySelectorAll('.ve-card').forEach(card => {
+        card.addEventListener('click', () => {
+            const id = parseInt(card.dataset.id);
+            const t = VIDEO_TUTORIALS.find(x => x.id === id);
+            if (t) showTutorialDetail(t);
+        });
+    });
+}
+
+function showTutorialDetail(tutorial) {
+    const isLearned = getData('videoLearned', []).includes(tutorial.id);
+    const isTask = getData('videoTasks', []).includes(tutorial.id);
+    $('#veDetailContent').innerHTML = `
+        <div class="ve-detail-close">
+            <button id="veDetailClose">✕</button>
+        </div>
+        <div class="ve-detail-header">
+            <span class="ve-card-cat-badge ${CAT_BADGE_CLASS[tutorial.cat] || tutorial.cat}">${CAT_BADGE_TEXT[tutorial.cat] || CAT_LABELS[tutorial.cat]}</span>
+            <span class="ve-detail-title">${escapeHtml(tutorial.title)}</span>
+        </div>
+        <div class="ve-detail-meta">
+            <span>🛠️ ${escapeHtml(tutorial.toolLabel)}</span>
+            <span>⏱️ ${tutorial.time}</span>
+            <span>难度 ${getStars(tutorial.stars)}</span>
+        </div>
+        <div style="font-size:14px;color:var(--text-secondary);margin-bottom:16px;line-height:1.6;">${escapeHtml(tutorial.desc)}</div>
+        <div class="ve-detail-actions">
+            <button class="ve-detail-start-btn ${isLearned ? 'learned' : ''}" id="veDetailStartBtn">
+                <span>🎬</span> ${isLearned ? '已完成，再看一遍' : '开始学'}
+            </button>
+            <button class="ve-detail-task-btn ${isTask ? 'active' : ''}" id="veDetailTaskBtn">
+                ${isTask ? '⭐ 已收藏' : '☆ 加入任务'}
+            </button>
+        </div>
+        <div class="ve-detail-steps-title">学习步骤</div>
+        <div class="ve-detail-steps">
+            ${tutorial.steps.map((s, i) => `
+                <div class="ve-step">
+                    <div class="ve-step-num">${i + 1}</div>
+                    <div class="ve-step-text">${escapeHtml(s)}</div>
+                </div>
+            `).join('')}
+        </div>
+        <div class="ve-detail-tip">${tutorial.tip}</div>
+        <div class="ve-detail-tools">
+            ${tutorial.tags.map(tag => `<span class="ve-tool-tag">${escapeHtml(tag)}</span>`).join('')}
+        </div>
+    `;
+
+    $('#veDetailOverlay').style.display = 'flex';
+
+    $('#veDetailClose').addEventListener('click', () => {
+        $('#veDetailOverlay').style.display = 'none';
+    });
+
+    $('#veDetailStartBtn').addEventListener('click', () => {
+        markVideoLearned(tutorial.id);
+        const btn = $('#veDetailStartBtn');
+        btn.classList.add('learned');
+        btn.innerHTML = '<span>🎬</span> 已完成，再看一遍';
+        renderVideoTutorials(APP.veCat);
+        renderVideoTasks();
+    });
+
+    $('#veDetailTaskBtn').addEventListener('click', () => {
+        toggleVideoTask(tutorial.id);
+        const btn = $('#veDetailTaskBtn');
+        const nowTask = getData('videoTasks', []).includes(tutorial.id);
+        btn.classList.toggle('active', nowTask);
+        btn.textContent = nowTask ? '⭐ 已收藏' : '☆ 加入任务';
+    });
+}
+
+// ========== 内容复盘 ==========
+function initReview() {
+    const today = new Date();
+    $('#reviewDate').value = today.toISOString().split('T')[0];
+    $('#reviewFormTitle').textContent = `${today.getMonth() + 1}月${today.getDate()}日复盘`;
+
+    const reviews = getData('reviews', []);
+    renderReviews(reviews);
+
+    $('#saveReviewBtn').addEventListener('click', () => {
+        const date = $('#reviewDate').value;
+        const title = $('#reviewTitle').value.trim();
+        const pros = $('#reviewPros').value.trim();
+        const cons = $('#reviewCons').value.trim();
+        const improve = $('#reviewImprove').value.trim();
+        if (!date || !title) return showToast('请填写日期和标题');
+
+        const reviews = getData('reviews', []);
+        reviews.unshift({ id: Date.now(), date, title, pros, cons, improve });
+        setData('reviews', reviews);
+        renderReviews(reviews);
+        $('#reviewTitle').value = '';
+        $('#reviewPros').value = '';
+        $('#reviewCons').value = '';
+        $('#reviewImprove').value = '';
+        showToast('复盘已保存');
+    });
+}
+
+function renderReviews(reviews) {
+    const list = $('#reviewList');
+    if (reviews.length === 0) {
+        list.innerHTML = '<div style="text-align:center;padding:30px;color:#aaa;">暂无复盘记录</div>';
+        return;
+    }
+    list.innerHTML = reviews.map(r => `
+        <div class="review-item">
+            <button class="review-delete" data-id="${r.id}">🗑️</button>
+            <h4>${escapeHtml(r.title)}</h4>
+            <div class="review-date">📅 ${r.date}</div>
+            ${r.pros ? `<div class="review-section pros"><strong>✅ 优点：</strong>${escapeHtml(r.pros)}</div>` : ''}
+            ${r.cons ? `<div class="review-section cons"><strong>❌ 缺点：</strong>${escapeHtml(r.cons)}</div>` : ''}
+            ${r.improve ? `<div class="review-section improve"><strong>🔄 优化方向：</strong>${escapeHtml(r.improve)}</div>` : ''}
+        </div>
+    `).join('');
+
+    list.querySelectorAll('.review-delete').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const id = parseInt(btn.dataset.id);
+            const reviews = getData('reviews', []);
+            setData('reviews', reviews.filter(r => r.id !== id));
+            renderReviews(getData('reviews', []));
+            showToast('已删除');
+        });
+    });
+}
+
+// ========== 工作日程 ==========
+function initSchedule() {
+    $('#scheduleDate').value = new Date().toISOString().split('T')[0];
+
+    // 日程编辑弹窗事件
+    $('#closeScheduleEditModal').addEventListener('click', closeScheduleEdit);
+    $('#saveScheduleEditBtn').addEventListener('click', saveScheduleEdit);
+    $('#deleteScheduleBtn').addEventListener('click', deleteSchedule);
+    $('#scheduleEditModal').addEventListener('click', (e) => {
+        if (e.target === $('#scheduleEditModal')) closeScheduleEdit();
+    });
+
+    $$('.view-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            $$('.view-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            APP.scheduleView = tab.dataset.view;
+            renderSchedule();
+        });
+    });
+
+    $('#schedulePrev').addEventListener('click', () => {
+        if (APP.scheduleView === 'week') APP.scheduleDate.setDate(APP.scheduleDate.getDate() - 7);
+        else if (APP.scheduleView === 'month') APP.scheduleDate.setMonth(APP.scheduleDate.getMonth() - 1);
+        else APP.scheduleDate.setFullYear(APP.scheduleDate.getFullYear() - 1);
+        APP.scheduleDate = new Date(APP.scheduleDate);
+        renderSchedule();
+    });
+
+    $('#scheduleNext').addEventListener('click', () => {
+        if (APP.scheduleView === 'week') APP.scheduleDate.setDate(APP.scheduleDate.getDate() + 7);
+        else if (APP.scheduleView === 'month') APP.scheduleDate.setMonth(APP.scheduleDate.getMonth() + 1);
+        else APP.scheduleDate.setFullYear(APP.scheduleDate.getFullYear() + 1);
+        APP.scheduleDate = new Date(APP.scheduleDate);
+        renderSchedule();
+    });
+
+    $('#addScheduleBtn').addEventListener('click', () => {
+        const text = $('#scheduleInput').value.trim();
+        const date = $('#scheduleDate').value;
+        const time = $('#scheduleTime').value;
+        const color = document.querySelector('.color-dot.active')?.dataset.color || '#333';
+        if (!text || !date) return showToast('请输入日程内容和日期');
+
+        const schedules = getData('schedules', []);
+        schedules.push({ id: Date.now(), text, date, time, color, done: false });
+        setData('schedules', schedules);
+        $('#scheduleInput').value = '';
+        $('#scheduleTime').value = '';
+        renderSchedule();
+        showToast('日程已添加');
+    });
+
+    // 颜色选择
+    document.querySelectorAll('.color-dot').forEach(dot => {
+        dot.addEventListener('click', () => {
+            document.querySelectorAll('.color-dot').forEach(d => d.classList.remove('active'));
+            dot.classList.add('active');
+        });
+    });
+
+    // 保存本月总结
+    $('#saveMonthSummaryBtn').addEventListener('click', () => {
+        const d = APP.scheduleDate;
+        const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+        const text = $('#monthSummaryInput').value.trim();
+        const summaries = getData('monthSummaries', {});
+        summaries[key] = text;
+        setData('monthSummaries', summaries);
+        $('#monthSummaryDate').textContent = `已保存：${new Date().toLocaleString('zh-CN')}`;
+        showToast('本月总结已保存');
+    });
+
+    renderSchedule();
+}
+
+function renderSchedule() {
+    const d = APP.scheduleDate;
+    if (APP.scheduleView === 'week') renderWeekView(d);
+    else if (APP.scheduleView === 'month') renderMonthView(d);
+    else renderYearView(d);
+    renderMonthSummary();
+}
+
+function getWeekStart(d) {
+    const day = d.getDay();
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Monday start
+    return new Date(d.getFullYear(), d.getMonth(), diff);
+}
+
+function renderWeekView(d) {
+    const weekStart = getWeekStart(d);
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+
+    $('#scheduleTitle').textContent = `${weekStart.getFullYear()}年 ${formatDateShort(weekStart)} - ${formatDateShort(weekEnd)}`;
+
+    const schedules = getData('schedules', []);
+    const today = new Date().toISOString().split('T')[0];
+    const weekNames = ['一', '二', '三', '四', '五', '六', '日'];
+
+    let html = '<div class="week-grid">';
+    for (let i = 0; i < 7; i++) {
+        const date = new Date(weekStart);
+        date.setDate(date.getDate() + i);
+        const dateStr = date.toISOString().split('T')[0];
+        const isToday = dateStr === today;
+        const daySchedules = schedules.filter(s => s.date === dateStr);
+
+        html += `
+            <div class="week-day${isToday ? ' today' : ''}">
+                <div class="week-day-header">周${weekNames[i]}</div>
+                <div class="week-day-date">${date.getDate()}</div>
+                ${daySchedules.map(s => `
+                    <div class="schedule-task-item${s.done ? ' done' : ''}" data-id="${s.id}">
+                        <div class="sch-check${s.done ? ' done' : ''}"></div>
+                        <span style="color:${s.color || '#333'};">${escapeHtml(s.text)}${s.time ? ' ' + s.time : ''}</span>
+                        <button class="sch-delete" data-id="${s.id}">✕</button>
+                    </div>
+                `).join('')}
+            </div>`;
+    }
+    html += '</div>';
+    $('#scheduleContent').innerHTML = html;
+
+    bindScheduleEvents();
+}
+
+function renderMonthView(d) {
+    const year = d.getFullYear();
+    const month = d.getMonth();
+    $('#scheduleTitle').textContent = `${year}年${month + 1}月`;
+
+    const schedules = getData('schedules', []);
+    const today = new Date().toISOString().split('T')[0];
+    const firstDay = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const adjustedFirst = firstDay === 0 ? 6 : firstDay - 1; // Monday start
+
+    let html = '<div class="month-grid">';
+    html += '<div class="month-day-header">一</div><div class="month-day-header">二</div><div class="month-day-header">三</div><div class="month-day-header">四</div><div class="month-day-header">五</div><div class="month-day-header">六</div><div class="month-day-header">日</div>';
+
+    for (let i = 0; i < adjustedFirst; i++) {
+        html += '<div class="month-day empty"></div>';
+    }
+
+    for (let day = 1; day <= daysInMonth; day++) {
+        const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+        const isToday = dateStr === today;
+        const daySchedules = schedules.filter(s => s.date === dateStr);
+        const doneCount = daySchedules.filter(s => s.done).length;
+
+        html += `
+            <div class="month-day${isToday ? ' today' : ''}" data-date="${dateStr}">
+                <div class="month-day-num">${day}</div>
+                <div class="month-day-tasks">
+                    ${daySchedules.slice(0, 3).map(s => `
+                        <div class="month-task${s.done ? ' done' : ''}" data-id="${s.id}" style="color:${s.color || '#333'};border-left:3px solid ${s.color || '#333'};">
+                            ${escapeHtml(s.text)}${s.time ? ' ' + s.time : ''}
+                        </div>
+                    `).join('')}
+                    ${daySchedules.length > 3 ? `<div class="month-more">+${daySchedules.length - 3} 项</div>` : ''}
+                </div>
+                ${daySchedules.length > 0 ? `<div class="month-day-status">${doneCount}/${daySchedules.length}项</div>` : ''}
+            </div>`;
+    }
+    html += '</div>';
+    $('#scheduleContent').innerHTML = html;
+
+    // 月视图点击事件
+    $$('.month-task').forEach(task => {
+        task.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openScheduleEdit(parseInt(task.dataset.id));
+        });
+    });
+}
+
+function openScheduleEdit(id) {
+    const schedules = getData('schedules', []);
+    const s = schedules.find(s => s.id === id);
+    if (!s) return;
+
+    $('#editScheduleId').value = id;
+    $('#editScheduleText').value = s.text;
+    $('#editScheduleDate').value = s.date;
+    $('#editScheduleTime').value = s.time || '';
+    $('#scheduleEditModal').style.display = 'flex';
+}
+
+function closeScheduleEdit() {
+    $('#scheduleEditModal').style.display = 'none';
+}
+
+function saveScheduleEdit() {
+    const id = parseInt($('#editScheduleId').value);
+    const text = $('#editScheduleText').value.trim();
+    const date = $('#editScheduleDate').value;
+    const time = $('#editScheduleTime').value;
+    if (!text || !date) return showToast('请输入日程内容和日期');
+
+    const schedules = getData('schedules', []);
+    const s = schedules.find(s => s.id === id);
+    if (s) {
+        s.text = text;
+        s.date = date;
+        s.time = time;
+        setData('schedules', schedules);
+        closeScheduleEdit();
+        renderSchedule();
+        showToast('日程已更新');
+    }
+}
+
+function deleteSchedule() {
+    const id = parseInt($('#editScheduleId').value);
+    const schedules = getData('schedules', []);
+    setData('schedules', schedules.filter(s => s.id !== id));
+    closeScheduleEdit();
+    renderSchedule();
+    showToast('日程已删除');
+}
+
+function renderYearView(d) {
+    const year = d.getFullYear();
+    $('#scheduleTitle').textContent = `${year}年`;
+
+    const schedules = getData('schedules', []);
+    const months = ['一月', '二月', '三月', '四月', '五月', '六月', '七月', '八月', '九月', '十月', '十一月', '十二月'];
+
+    let html = '<div class="year-grid">';
+    for (let m = 0; m < 12; m++) {
+        const monthPrefix = `${year}-${String(m+1).padStart(2,'0')}`;
+        const count = schedules.filter(s => s.date.startsWith(monthPrefix)).length;
+        html += `
+            <div class="year-month" data-month="${m}">
+                <div class="year-month-name">${months[m]}</div>
+                <div class="year-month-count">${count} 项日程</div>
+            </div>`;
+    }
+    html += '</div>';
+    $('#scheduleContent').innerHTML = html;
+
+    $$('.year-month').forEach(ym => {
+        ym.addEventListener('click', () => {
+            APP.scheduleDate.setMonth(parseInt(ym.dataset.month));
+            APP.scheduleDate = new Date(APP.scheduleDate);
+            APP.scheduleView = 'month';
+            $$('.view-tab').forEach(t => t.classList.remove('active'));
+            document.querySelector('[data-view="month"]').classList.add('active');
+            renderSchedule();
+        });
+    });
+}
+
+function renderMonthSummary() {
+    const summaryBox = $('#monthSummary');
+    if (APP.scheduleView !== 'month') {
+        summaryBox.style.display = 'none';
+        return;
+    }
+    summaryBox.style.display = 'block';
+
+    const d = APP.scheduleDate;
+    const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    const summaries = getData('monthSummaries', {});
+    $('#monthSummaryInput').value = summaries[key] || '';
+    $('#monthSummaryDate').textContent = summaries[key] ? '本月已有总结' : '还没有本月总结';
+}
+
+function bindScheduleEvents() {
+    $$('.sch-check').forEach(check => {
+        check.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const item = check.closest('.schedule-task-item');
+            const id = parseInt(item.dataset.id);
+            const schedules = getData('schedules', []);
+            const s = schedules.find(s => s.id === id);
+            if (s) { s.done = !s.done; setData('schedules', schedules); }
+            renderSchedule();
+        });
+    });
+
+    $$('.sch-delete').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const id = parseInt(btn.dataset.id);
+            const schedules = getData('schedules', []);
+            setData('schedules', schedules.filter(s => s.id !== id));
+            renderSchedule();
+            showToast('日程已删除');
+        });
+    });
+}
+
+// ========== 英语学习 ==========
+const QUIZ_DATA = [
+    { q: '"Hello" 的中文意思是？', opts: ['你好', '再见', '谢谢', '对不起'], ans: 0 },
+    { q: '"Beautiful" 是什么意思？', opts: ['丑陋的', '美丽的', '高大的', '快速的'], ans: 1 },
+    { q: 'I ___ a student. (选择正确的be动词)', opts: ['is', 'am', 'are', 'be'], ans: 1 },
+    { q: '"Thank you" 的中文意思是？', opts: ['对不起', '没关系', '谢谢', '再见'], ans: 2 },
+    { q: 'She ___ to school every day.', opts: ['go', 'goes', 'going', 'gone'], ans: 1 },
+    { q: '"Happy" 的反义词是？', opts: ['Sad', 'Big', 'Small', 'Fast'], ans: 0 },
+    { q: '"苹果" 的英文是？', opts: ['Banana', 'Orange', 'Apple', 'Grape'], ans: 2 },
+    { q: 'How ___ are you? I\'m 20 years old.', opts: ['many', 'much', 'old', 'long'], ans: 2 },
+    { q: '"Good morning" 是什么意思？', opts: ['晚安', '早上好', '下午好', '再见'], ans: 1 },
+    { q: 'They ___ playing football now.', opts: ['is', 'am', 'are', 'be'], ans: 2 },
+];
+
+const SPEAK_DATA = [
+    { text: 'Hello, how are you today?', cn: '你好，你今天怎么样？' },
+    { text: 'I love learning English.', cn: '我喜欢学英语。' },
+    { text: 'The weather is beautiful today.', cn: '今天天气很好。' },
+    { text: 'Could you help me please?', cn: '请问你能帮我吗？' },
+    { text: 'Nice to meet you!', cn: '很高兴见到你！' },
+    { text: 'What time is it now?', cn: '现在几点了？' },
+    { text: 'I want to travel around the world.', cn: '我想环游世界。' },
+    { text: 'Practice makes perfect.', cn: '熟能生巧。' },
+    { text: 'Where are you from?', cn: '你来自哪里？' },
+    { text: 'How much is this?', cn: '这个多少钱？' },
+    { text: 'I would like a cup of coffee.', cn: '我想要一杯咖啡。' },
+    { text: 'Can you speak slowly?', cn: '你能说慢一点吗？' },
+    { text: 'What is your favorite food?', cn: '你最喜欢的食物是什么？' },
+    { text: 'I am learning English every day.', cn: '我每天都在学英语。' },
+    { text: 'Thank you for your help.', cn: '谢谢你的帮助。' },
+];
+
+function initEnglish() {
+    APP.englishSeconds = getData('englishTime', 0);
+    updateTimerDisplay();
+
+    $('#timerStartBtn').addEventListener('click', startTimer);
+    $('#timerPauseBtn').addEventListener('click', pauseTimer);
+    $('#timerResetBtn').addEventListener('click', resetTimer);
+
+    $$('.eng-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            $$('.eng-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            APP.englishMode = tab.dataset.mode;
+            renderEnglishContent();
+        });
+    });
+
+    renderEnglishContent();
+}
+
+function startTimer() {
+    if (APP.englishTimer) return;
+    APP.englishTimer = setInterval(() => {
+        APP.englishSeconds++;
+        if (APP.englishSeconds >= 1800) { // 30 minutes
+            pauseTimer();
+            showToast('🎉 今日学习目标完成！');
+        }
+        updateTimerDisplay();
+        setData('englishTime', APP.englishSeconds);
+    }, 1000);
+}
+
+function pauseTimer() {
+    clearInterval(APP.englishTimer);
+    APP.englishTimer = null;
+    setData('englishTime', APP.englishSeconds);
+}
+
+function resetTimer() {
+    pauseTimer();
+    APP.englishSeconds = 0;
+    updateTimerDisplay();
+    setData('englishTime', 0);
+}
+
+function updateTimerDisplay() {
+    const mins = Math.floor(APP.englishSeconds / 60);
+    const secs = APP.englishSeconds % 60;
+    $('#englishTimer').textContent = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    const pct = Math.min(100, (APP.englishSeconds / 1800) * 100);
+    $('#englishFill').style.width = pct + '%';
+    $('#englishProgress').textContent = `今日已学 ${mins} / 30 分钟`;
+}
+
+function renderEnglishContent() {
+    const content = $('#englishContent');
+    if (APP.englishMode === 'quiz') {
+        APP.quizIndex = APP.quizIndex || 0;
+        APP.quizCorrect = APP.quizCorrect || 0;
+        const quiz = QUIZ_DATA[APP.quizIndex % QUIZ_DATA.length];
+        content.innerHTML = `
+            <div class="quiz-card">
+                <div style="font-size:13px;color:#888;margin-bottom:8px;">第 ${APP.quizIndex + 1} 题 | 已答对 ${APP.quizCorrect} 题</div>
+                <div class="quiz-question">${quiz.q}</div>
+                <div class="quiz-options">
+                    ${quiz.opts.map((opt, i) => `<div class="quiz-option" data-idx="${i}">${String.fromCharCode(65+i)}. ${opt}</div>`).join('')}
+                </div>
+                <div class="quiz-result" id="quizResult"></div>
+                <button class="quiz-next" id="quizNextBtn" style="display:none;">下一题 ▶</button>
+            </div>
+        `;
+
+        $$('.quiz-option').forEach(opt => {
+            opt.addEventListener('click', function() {
+                const idx = parseInt(this.dataset.idx);
+                const quiz = QUIZ_DATA[APP.quizIndex % QUIZ_DATA.length];
+                $$('.quiz-option').forEach(o => o.style.pointerEvents = 'none');
+                if (idx === quiz.ans) {
+                    this.classList.add('correct');
+                    $('#quizResult').innerHTML = '✅ 回答正确！';
+                    $('#quizResult').style.color = 'var(--success)';
+                    APP.quizCorrect++;
+                    removeMistake(quiz.q);
+                } else {
+                    this.classList.add('wrong');
+                    $$('.quiz-option')[quiz.ans].classList.add('correct');
+                    $('#quizResult').innerHTML = `❌ 正确答案是 ${String.fromCharCode(65+quiz.ans)}`;
+                    $('#quizResult').style.color = 'var(--danger)';
+                    addMistake(quiz, idx);
+                }
+                $('#quizNextBtn').style.display = 'inline-block';
+            });
+        });
+
+        $('#quizNextBtn').addEventListener('click', () => {
+            APP.quizIndex++;
+            renderEnglishContent();
+        });
+    } else if (APP.englishMode === 'mistakes') {
+        renderMistakes();
+    } else {
+        const item = SPEAK_DATA[APP.speakIndex % SPEAK_DATA.length];
+        const current = APP.speakIndex % SPEAK_DATA.length + 1;
+        const total = SPEAK_DATA.length;
+        content.innerHTML = `
+            <div class="speak-card">
+                <div class="speak-progress">跟读练习 ${current}/${total}</div>
+                <div class="speak-text">"${item.text}"</div>
+                <div class="speak-cn">${item.cn}</div>
+                <button class="speak-btn" id="speakBtn">🎤 开始跟读</button>
+                <div class="speak-result" id="speakResult"></div>
+            </div>
+        `;
+
+        $('#speakBtn').addEventListener('click', () => {
+            if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                const recognition = new SpeechRecognition();
+                recognition.lang = 'en-US';
+                recognition.interimResults = false;
+                $('#speakResult').innerHTML = '🎙️ 正在聆听...<br>请朗读上方英文短句';
+                recognition.start();
+                recognition.onresult = (event) => {
+                    const spoken = event.results[0][0].transcript.trim();
+                    const similarity = calculateSimilarity(spoken.toLowerCase(), item.text.toLowerCase());
+                    const percent = Math.round(similarity * 100);
+                    if (similarity >= 0.8) {
+                        $('#speakResult').innerHTML = `✅ 很好！你说的是：${spoken}<br>相似度：${percent}%<br><span style="font-size:13px;">2秒后自动进入下一句...</span>`;
+                        $('#speakResult').style.color = 'var(--success)';
+                        setTimeout(() => {
+                            APP.speakIndex++;
+                            renderEnglishContent();
+                        }, 2000);
+                    } else {
+                        $('#speakResult').innerHTML = `🔄 你说的是：${spoken}<br>原文：${item.text}<br>相似度：${percent}%，再试一次~`;
+                        $('#speakResult').style.color = 'var(--warning)';
+                    }
+                };
+                recognition.onerror = () => {
+                    $('#speakResult').textContent = '⚠️ 语音识别失败，请检查麦克风权限';
+                    $('#speakResult').style.color = 'var(--danger)';
+                };
+            } else {
+                $('#speakResult').textContent = '⚠️ 你的浏览器不支持语音识别，请使用Chrome浏览器';
+                $('#speakResult').style.color = 'var(--danger)';
+            }
+        });
+    }
+}
+
+// ========== 错题合集 ==========
+function addMistake(quiz, wrongIdx) {
+    const mistakes = getData('englishMistakes', []);
+    const existing = mistakes.find(m => m.q === quiz.q);
+    if (!existing) {
+        mistakes.unshift({
+            q: quiz.q,
+            opts: quiz.opts,
+            ans: quiz.ans,
+            wrong: wrongIdx,
+            count: 1,
+            date: new Date().toISOString().split('T')[0]
+        });
+    } else {
+        existing.wrong = wrongIdx;
+        existing.count++;
+        existing.date = new Date().toISOString().split('T')[0];
+    }
+    setData('englishMistakes', mistakes);
+}
+
+function removeMistake(q) {
+    const mistakes = getData('englishMistakes', []);
+    const idx = mistakes.findIndex(m => m.q === q);
+    if (idx !== -1) {
+        mistakes[idx].count--;
+        if (mistakes[idx].count <= 0) {
+            mistakes.splice(idx, 1);
+        }
+        setData('englishMistakes', mistakes);
+    }
+}
+
+function renderMistakes() {
+    const content = $('#englishContent');
+    const mistakes = getData('englishMistakes', []);
+
+    if (APP.mistakeQuizIndex !== undefined && mistakes[APP.mistakeQuizIndex]) {
+        // 正在练习错题
+        const m = mistakes[APP.mistakeQuizIndex];
+        const current = APP.mistakeQuizIndex + 1;
+        const total = mistakes.length;
+        content.innerHTML = `
+            <div class="quiz-card">
+                <div style="font-size:13px;color:#888;margin-bottom:8px;">错题练习 ${current}/${total} | 答对后自动移出错题本</div>
+                <div class="quiz-question">${m.q}</div>
+                <div class="quiz-options">
+                    ${m.opts.map((opt, i) => `<div class="quiz-option" data-idx="${i}">${String.fromCharCode(65+i)}. ${opt}</div>`).join('')}
+                </div>
+                <div class="quiz-result" id="mistakeResult"></div>
+                <button class="quiz-next" id="mistakeNextBtn" style="display:none;">下一题 ▶</button>
+            </div>
+        `;
+
+        $$('.quiz-option').forEach(opt => {
+            opt.addEventListener('click', function() {
+                const idx = parseInt(this.dataset.idx);
+                $$('.quiz-option').forEach(o => o.style.pointerEvents = 'none');
+                if (idx === m.ans) {
+                    this.classList.add('correct');
+                    $('#mistakeResult').innerHTML = '✅ 回答正确！已从错题本移除';
+                    $('#mistakeResult').style.color = 'var(--success)';
+                    removeMistake(m.q);
+                } else {
+                    this.classList.add('wrong');
+                    $$('.quiz-option')[m.ans].classList.add('correct');
+                    $('#mistakeResult').innerHTML = `❌ 正确答案是 ${String.fromCharCode(65+m.ans)}，已记录错选`;
+                    $('#mistakeResult').style.color = 'var(--danger)';
+                    addMistake(m, idx);
+                }
+                $('#mistakeNextBtn').style.display = 'inline-block';
+            });
+        });
+
+        $('#mistakeNextBtn').addEventListener('click', () => {
+            APP.mistakeQuizIndex++;
+            const updated = getData('englishMistakes', []);
+            if (APP.mistakeQuizIndex >= updated.length) {
+                APP.mistakeQuizIndex = 0;
+            }
+            renderMistakes();
+        });
+        return;
+    }
+
+    // 错题列表
+    if (mistakes.length === 0) {
+        content.innerHTML = `
+            <div class="mistakes-empty">
+                <div class="mistakes-empty-icon">🎉</div>
+                <div class="mistakes-empty-title">还没有错题</div>
+                <div class="mistakes-empty-desc">快去闯关答题吧，答错的题目会自动收录到这里~</div>
+            </div>
+        `;
+        return;
+    }
+
+    content.innerHTML = `
+        <div class="mistakes-header">
+            <div>
+                <div class="mistakes-count">共 ${mistakes.length} 道错题</div>
+                <div class="mistakes-tip">答对后自动移出错题本，可反复练习</div>
+            </div>
+            <button class="mistakes-start-btn" id="startMistakeQuiz">开始练习</button>
+        </div>
+        <div class="mistakes-list">
+            ${mistakes.map((m, i) => `
+                <div class="mistake-item">
+                    <div class="mistake-q">${i + 1}. ${m.q}</div>
+                    <div class="mistake-answer">
+                        <span class="wrong-answer">❌ 你选：${String.fromCharCode(65+m.wrong)}. ${escapeHtml(m.opts[m.wrong])}</span>
+                        <span class="correct-answer">✅ 正确：${String.fromCharCode(65+m.ans)}. ${escapeHtml(m.opts[m.ans])}</span>
+                    </div>
+                    <div class="mistake-meta">练错 ${m.count} 次 · ${m.date}</div>
+                </div>
+            `).join('')}
+        </div>
+    `;
+
+    $('#startMistakeQuiz').addEventListener('click', () => {
+        APP.mistakeQuizIndex = 0;
+        renderMistakes();
+    });
+}
+
+function calculateSimilarity(a, b) {
+    const longer = a.length > b.length ? a : b;
+    const shorter = a.length > b.length ? b : a;
+    if (longer.length === 0) return 1;
+    const editDistance = levenshtein(longer, shorter);
+    return (longer.length - editDistance) / longer.length;
+}
+
+function levenshtein(a, b) {
+    const matrix = Array.from({ length: a.length + 1 }, (_, i) => [i]);
+    for (let j = 0; j <= b.length; j++) matrix[0][j] = j;
+    for (let i = 1; i <= a.length; i++) {
+        for (let j = 1; j <= b.length; j++) {
+            matrix[i][j] = Math.min(
+                matrix[i-1][j] + 1,
+                matrix[i][j-1] + 1,
+                matrix[i-1][j-1] + (a[i-1] === b[j-1] ? 0 : 1)
+            );
+        }
+    }
+    return matrix[a.length][b.length];
+}
+
+// ========== 每日新闻 ==========
+async function loadNews() {
+    $('#newsLoading').style.display = 'block';
+    $('#newsList').innerHTML = '';
+
+    try {
+        // 使用免费新闻API
+        const resp = await fetch('https://newsdata.io/api/1/news?apikey=pub_626121fe95e41403dd176b16060e3d6bf6bc3&country=cn&language=zh&size=15');
+        if (resp.ok) {
+            const data = await resp.json();
+            if (data.results && data.results.length > 0) {
+                const news = data.results.map(n => ({
+                    id: n.article_id || Date.now() + Math.random(),
+                    title: n.title,
+                    source: n.source_id || '新闻来源',
+                    link: n.link,
+                    date: n.pubDate ? new Date(n.pubDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]
+                }));
+                setData('newsCache', { data: news, time: Date.now() });
+                renderNews(news);
+                return;
+            }
+        }
+    } catch {}
+
+    // 使用缓存
+    const cached = getData('newsCache');
+    if (cached && cached.data.length > 0) {
+        renderNews(cached.data);
+    } else {
+        // 兜底数据
+        const fallback = [
+            { id: 1, title: '中国科技创新成果持续涌现，多项技术达国际领先水平', source: '新华社', date: new Date().toISOString().split('T')[0], link: '#' },
+            { id: 2, title: '数字经济规模持续扩大，成为推动高质量发展重要引擎', source: '人民日报', date: new Date().toISOString().split('T')[0], link: '#' },
+            { id: 3, title: '绿色低碳发展取得新成效，新能源产业快速发展', source: '央视新闻', date: new Date().toISOString().split('T')[0], link: '#' },
+            { id: 4, title: '乡村振兴战略深入推进，农村面貌持续改善', source: '农民日报', date: new Date().toISOString().split('T')[0], link: '#' },
+            { id: 5, title: '教育领域改革不断深化，人才培养质量稳步提升', source: '中国教育报', date: new Date().toISOString().split('T')[0], link: '#' },
+            { id: 6, title: '文化自信持续增强，中华优秀传统文化焕发新活力', source: '光明日报', date: new Date().toISOString().split('T')[0], link: '#' },
+            { id: 7, title: '体育强国建设加速推进，全民健身热潮持续升温', source: '中国体育报', date: new Date().toISOString().split('T')[0], link: '#' },
+            { id: 8, title: '一带一路合作不断深化，互利共赢成果丰硕', source: '经济日报', date: new Date().toISOString().split('T')[0], link: '#' },
+        ];
+        renderNews(fallback);
+    }
+}
+
+function renderNews(newsList) {
+    $('#newsLoading').style.display = 'none';
+    const list = $('#newsList');
+    list.innerHTML = newsList.map(n => `
+        <div class="news-item">
+            <div class="news-title">${escapeHtml(n.title)}</div>
+            <div class="news-source">📅 ${n.date} | ${escapeHtml(n.source)}</div>
+            <div class="news-actions">
+                <button class="save-insp-btn" data-title="${escapeHtml(n.title)}">💡 存为灵感</button>
+            </div>
+        </div>
+    `).join('');
+
+    list.querySelectorAll('.save-insp-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const inspirations = getData('inspirations', []);
+            inspirations.unshift({
+                id: Date.now(),
+                text: `📰 ${btn.dataset.title}`,
+                tags: ['新闻'],
+                date: new Date().toISOString().split('T')[0]
+            });
+            setData('inspirations', inspirations);
+            showToast('已保存为灵感');
+        });
+    });
+}
+
+function initNews() {
+    $('#refreshNewsBtn').addEventListener('click', loadNews);
+    // 初始加载在切换面板时触发
+}
+
+// ========== 备忘录 ==========
+function initMemo() {
+    const memos = getData('memos', []);
+    $('#memoDate').value = new Date().toISOString().split('T')[0];
+    $('#memoDate').max = new Date().toISOString().split('T')[0];
+    renderMemos(memos);
+    initMoodDiary();
+
+    let pendingImage = null;
+
+    $('#memoImage').addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        if (file.size > 2 * 1024 * 1024) {
+            showToast('图片不能超过 2MB');
+            return;
+        }
+        const reader = new FileReader();
+        reader.onload = () => {
+            pendingImage = reader.result;
+            const preview = $('#memoImagePreview');
+            preview.innerHTML = `<img src="${pendingImage}" alt="预览"><button class="memo-remove-image" id="memoRemoveImage">✕</button>`;
+            preview.style.display = 'block';
+            $('#memoRemoveImage').addEventListener('click', () => {
+                pendingImage = null;
+                preview.style.display = 'none';
+                preview.innerHTML = '';
+                $('#memoImage').value = '';
+            });
+        };
+        reader.readAsDataURL(file);
+    });
+
+    $('#saveMemoBtn').addEventListener('click', () => {
+        const text = $('#memoInput').value.trim();
+        if (!text && !pendingImage) return showToast('请输入内容或插入图片');
+        const memos = getData('memos', []);
+        memos.unshift({
+            id: Date.now(),
+            text,
+            image: pendingImage,
+            date: $('#memoDate').value || new Date().toISOString().split('T')[0]
+        });
+        setData('memos', memos);
+        renderMemos(memos);
+        $('#memoInput').value = '';
+        $('#memoImage').value = '';
+        pendingImage = null;
+        $('#memoImagePreview').style.display = 'none';
+        $('#memoImagePreview').innerHTML = '';
+        showToast('备忘录已保存');
+    });
+}
+
+function renderMemos(memos) {
+    const list = $('#memoList');
+    if (memos.length === 0) {
+        list.innerHTML = '<div style="text-align:center;padding:30px;color:#ccc;">还没有备忘录，随手记点东西吧~</div>';
+        return;
+    }
+    list.innerHTML = memos.map(m => {
+        const d = m.date ? new Date(m.date + 'T00:00:00') : new Date(m.createdAt || m.id);
+        const imgHtml = m.image ? `<div class="memo-image"><img src="${m.image}" alt="备忘录图片" loading="lazy"></div>` : '';
+        return `
+            <div class="memo-item">
+                <button class="memo-delete" data-id="${m.id}">🗑️</button>
+                ${m.text ? `<div class="memo-content">${escapeHtml(m.text)}</div>` : ''}
+                ${imgHtml}
+                <div class="memo-date">${formatDate(d)}</div>
+            </div>
+        `;
+    }).join('');
+
+    list.querySelectorAll('.memo-delete').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const id = parseInt(btn.dataset.id);
+            const memos = getData('memos', []);
+            setData('memos', memos.filter(m => m.id !== id));
+            renderMemos(getData('memos', []));
+            showToast('已删除');
+        });
+    });
+}
+
+// ========== 心情日记 ==========
+const MOOD_WEATHER = [
+    { icon: '☀️', label: '晴' },
+    { icon: '🌤️', label: '多云' },
+    { icon: '⛅', label: '阴' },
+    { icon: '🌧️', label: '雨' },
+    { icon: '❄️', label: '雪' },
+    { icon: '⛈️', label: '雷暴' },
+];
+
+const MOOD_EMOJIS = [
+    { icon: '😊', label: '开心' },
+    { icon: '😄', label: '超棒' },
+    { icon: '😰', label: '焦虑' },
+    { icon: '😴', label: '疲惫' },
+    { icon: '🤔', label: '思考' },
+    { icon: '😢', label: '难过' },
+];
+
+let selectedWeather = '☀️';
+let selectedMood = '😊';
+
+function initMoodDiary() {
+    const today = new Date().toISOString().split('T')[0];
+    $('#moodDiaryDateDisplay').textContent = today;
+
+    // 渲染天气选择
+    $('#moodWeatherOptions').innerHTML = MOOD_WEATHER.map(w => `
+        <button class="mood-option-btn ${w.icon === selectedWeather ? 'selected' : ''}" data-type="weather" data-value="${w.icon}" title="${w.label}">
+            <span class="mood-option-icon">${w.icon}</span>
+            <span class="mood-option-label">${w.label}</span>
+        </button>
+    `).join('');
+
+    $('#moodMoodOptions').innerHTML = MOOD_EMOJIS.map(m => `
+        <button class="mood-option-btn ${m.icon === selectedMood ? 'selected' : ''}" data-type="mood" data-value="${m.icon}" title="${m.label}">
+            <span class="mood-option-icon">${m.icon}</span>
+            <span class="mood-option-label">${m.label}</span>
+        </button>
+    `).join('');
+
+    $$('#moodWeatherOptions .mood-option-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            selectedWeather = btn.dataset.value;
+            $$('#moodWeatherOptions .mood-option-btn').forEach(b => b.classList.remove('selected'));
+            btn.classList.add('selected');
+        });
+    });
+
+    $$('#moodMoodOptions .mood-option-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            selectedMood = btn.dataset.value;
+            $$('#moodMoodOptions .mood-option-btn').forEach(b => b.classList.remove('selected'));
+            btn.classList.add('selected');
+        });
+    });
+
+    $('#saveMoodDiaryBtn').addEventListener('click', () => {
+        const content = $('#moodDiaryInput').value.trim();
+        const progress = $('#moodDiaryProgress').value.trim();
+        const date = new Date().toISOString().split('T')[0];
+        if (!content && !progress) return showToast('写点什么再保存吧');
+
+        const diaries = getData('moodDiaries', []);
+        // 同一天只保留一条，覆盖更新
+        const filtered = diaries.filter(d => d.date !== date);
+        filtered.unshift({
+            id: Date.now(),
+            date,
+            weather: selectedWeather,
+            mood: selectedMood,
+            content,
+            progress
+        });
+        setData('moodDiaries', filtered);
+        renderMoodDiaries();
+        $('#moodDiaryInput').value = '';
+        $('#moodDiaryProgress').value = '';
+        showToast('心情日记已保存');
+    });
+
+    renderMoodDiaries();
+}
+
+function renderMoodDiaries() {
+    const diaries = getData('moodDiaries', []);
+    const list = $('#moodDiaryList');
+    if (diaries.length === 0) {
+        list.innerHTML = '<div class="mood-diary-empty"><span class="mood-empty-icon">🌱</span><div class="mood-empty-text">还没有日记，今天写第一篇吧</div></div>';
+        return;
+    }
+    list.innerHTML = diaries.map(d => `
+        <div class="mood-diary-item">
+            <button class="mood-diary-delete" data-id="${d.id}">✕</button>
+            <div class="mood-diary-item-header">
+                <span class="mood-diary-item-date">${d.date}</span>
+                <span class="mood-diary-item-weather">${d.weather}</span>
+                <span class="mood-diary-item-mood">${d.mood}</span>
+            </div>
+            ${d.content ? `<div class="mood-diary-item-content">${escapeHtml(d.content)}</div>` : ''}
+            ${d.progress ? `<div class="mood-diary-item-progress">🌱 ${escapeHtml(d.progress)}</div>` : ''}
+        </div>
+    `).join('');
+
+    list.querySelectorAll('.mood-diary-delete').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const id = parseInt(btn.dataset.id);
+            const diaries = getData('moodDiaries', []);
+            setData('moodDiaries', diaries.filter(d => d.id !== id));
+            renderMoodDiaries();
+            showToast('已删除');
+        });
+    });
+}
+
+// ========== 数据备份与恢复 ==========
+function initBackupRestore() {
+    $('#backupBtn').addEventListener('click', () => {
+        $('#backupModal').style.display = 'flex';
+    });
+
+    $('#closeBackupModal').addEventListener('click', () => {
+        $('#backupModal').style.display = 'none';
+    });
+
+    $('#backupModal').addEventListener('click', (e) => {
+        if (e.target === $('#backupModal')) {
+            $('#backupModal').style.display = 'none';
+        }
+    });
+
+    function getBackupData() {
+        const data = {};
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith('zz_')) {
+                try { data[key] = JSON.parse(localStorage.getItem(key)); }
+                catch (e) { data[key] = localStorage.getItem(key); }
+            }
+        }
+        return data;
+    }
+
+    $('#exportDataBtn').addEventListener('click', () => {
+        const data = getBackupData();
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        const date = new Date().toISOString().split('T')[0];
+        a.href = url;
+        a.download = `zaizai-workbench-backup-${date}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showToast('备份文件已导出，请在文件App的下载项中查看');
+    });
+
+    $('#copyDataBtn').addEventListener('click', () => {
+        const data = getBackupData();
+        const text = JSON.stringify(data, null, 2);
+        // iOS Safari 剪贴板 API 不可靠，直接在页面上显示文本框让用户手动复制
+        const existing = document.getElementById('copyTextBox');
+        if (existing) existing.remove();
+        const box = document.createElement('div');
+        box.id = 'copyTextBox';
+        box.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:10000;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;';
+        box.innerHTML = `
+            <div style="background:#fff;border-radius:16px;width:100%;max-width:500px;max-height:80vh;display:flex;flex-direction:column;overflow:hidden;">
+                <div style="padding:16px 20px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;">
+                    <span style="font-size:16px;font-weight:600;color:#333;">📋 备份数据（长按全选复制）</span>
+                    <button id="closeCopyBox" style="background:none;border:none;font-size:22px;color:#999;cursor:pointer;padding:0 8px;">✕</button>
+                </div>
+                <div style="padding:12px 16px;flex:1;overflow:auto;">
+                    <textarea id="copyTextArea" readonly style="width:100%;height:300px;font-size:11px;font-family:monospace;border:1px solid #ddd;border-radius:8px;padding:10px;box-sizing:border-box;word-break:break-all;" onclick="this.select()">${text.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea>
+                </div>
+                <div style="padding:12px 20px;border-top:1px solid #eee;text-align:center;">
+                    <p style="font-size:13px;color:#666;margin:0 0 10px;">👆 点击上方文本框自动全选，再长按选「复制」</p>
+                    <button id="closeCopyBox2" style="background:#FF6B8A;color:#fff;border:none;border-radius:10px;padding:10px 24px;font-size:14px;font-weight:600;width:100%;">我已复制，关闭</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(box);
+        const close = () => box.remove();
+        box.querySelector('#closeCopyBox').addEventListener('click', close);
+        box.querySelector('#closeCopyBox2').addEventListener('click', close);
+        // 自动选中文本
+        setTimeout(() => {
+            const ta = box.querySelector('#copyTextArea');
+            ta.focus();
+            ta.select();
+        }, 100);
+        showToast('点击文本框全选，长按复制');
+    });
+
+    $('#importDataFile').addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+            try {
+                const data = JSON.parse(reader.result);
+                if (!confirm('导入会覆盖当前所有数据，确定继续吗？')) return;
+                // 先清除所有 zz_ 前缀数据
+                const keysToRemove = [];
+                for (let i = 0; i < localStorage.length; i++) {
+                    const key = localStorage.key(i);
+                    if (key && key.startsWith('zz_')) keysToRemove.push(key);
+                }
+                keysToRemove.forEach(key => localStorage.removeItem(key));
+                // 写入新数据
+                Object.keys(data).forEach(key => {
+                    if (key.startsWith('zz_')) {
+                        localStorage.setItem(key, JSON.stringify(data[key]));
+                    }
+                });
+                showToast('数据已恢复，刷新页面生效');
+                $('#backupModal').style.display = 'none';
+                $('#importDataFile').value = '';
+                setTimeout(() => location.reload(), 1200);
+            } catch (err) {
+                showToast('备份文件格式错误');
+            }
+        };
+        reader.readAsText(file);
+    });
+}
+
+// ========== 自定义Emoji弹窗 ==========// ========== 自定义Emoji弹窗 ==========
+function initEmojiModal() {
+    const commonEmojis = [
+        '📋','💰','📈','💡','🔥','📝','📅','🇬🇧','📰','🗒️',
+        '✅','🎯','💪','🌟','🎨','📊','🏠','❤️','🎵','📚',
+        '✈️','🍔','🎮','💻','📱','🎬','🏃','🧘','🎉','🌈',
+        '⭐','🔔','📌','💬','🎪','🌺','🍀','🎁','🔮','💎',
+        '🦄','🐣','🌸','💫','🌙','☕','🎧','📷','🛒','🏖️',
+    ];
+
+    const grid = $('#emojiGrid');
+    grid.innerHTML = commonEmojis.map(e => `<button class="emoji-option">${e}</button>`).join('');
+
+    grid.querySelectorAll('.emoji-option').forEach(btn => {
+        btn.addEventListener('click', () => {
+            if (APP.currentNavEdit !== null) {
+                grid.querySelectorAll('.emoji-option').forEach(b => b.classList.remove('selected'));
+                btn.classList.add('selected');
+                $('#customEmojiInput').value = btn.textContent;
+            }
+        });
+    });
+
+    $('#emojiSettingsBtn').addEventListener('click', () => {
+        APP.currentNavEdit = null;
+        $('#customEmojiInput').value = '';
+        grid.querySelectorAll('.emoji-option').forEach(b => b.classList.remove('selected'));
+        $('#emojiModal').style.display = 'flex';
+        showToast('请先点击要修改的导航项');
+    });
+
+    // 点击导航emoji进入编辑模式
+    document.addEventListener('click', (e) => {
+        const emojiSpan = e.target.closest('.nav-emoji');
+        if (emojiSpan) {
+            const navId = emojiSpan.dataset.navId;
+            APP.currentNavEdit = navId;
+            $('#emojiModal').style.display = 'flex';
+            const navItem = APP.emojiData.find(n => n.id === navId);
+            if (navItem) {
+                $('#customEmojiInput').value = navItem.emoji;
+                grid.querySelectorAll('.emoji-option').forEach(b => {
+                    b.classList.toggle('selected', b.textContent === navItem.emoji);
+                });
+            }
+        }
+    });
+
+    $('#closeEmojiModal').addEventListener('click', () => {
+        $('#emojiModal').style.display = 'none';
+        APP.currentNavEdit = null;
+    });
+
+    $('#emojiModal').addEventListener('click', (e) => {
+        if (e.target === $('#emojiModal')) {
+            $('#emojiModal').style.display = 'none';
+            APP.currentNavEdit = null;
+        }
+    });
+
+    $('#applyEmojiBtn').addEventListener('click', () => {
+        const emoji = $('#customEmojiInput').value.trim();
+        if (!emoji) return showToast('请输入emoji图标');
+        if (APP.currentNavEdit === null) return showToast('请先点击左侧导航项的图标');
+
+        const navItem = APP.emojiData.find(n => n.id === APP.currentNavEdit);
+        if (navItem) {
+            navItem.emoji = emoji;
+            setData('nav', APP.emojiData);
+            renderNav();
+            showToast('图标已更新');
+        }
+        $('#emojiModal').style.display = 'none';
+        APP.currentNavEdit = null;
+    });
+}
+
+// ========== 响应式处理 ==========
+function initResponsive() {
+    const handleResize = () => {
+        if (window.innerWidth <= 768) {
+            $('#sidebar').classList.remove('open');
+            $('#mainContent').classList.add('expanded');
+        } else {
+            $('#sidebar').classList.remove('collapsed', 'open');
+            $('#mainContent').classList.remove('expanded');
+            $('#overlay').style.display = 'none';
+        }
+    };
+    handleResize();
+    window.addEventListener('resize', handleResize);
+}
+
+// ========== HTML转义 ==========
+function escapeHtml(str) {
+    if (!str) return '';
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+// ========== 键盘快捷键 ==========
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        $('#emojiModal').style.display = 'none';
+        APP.currentNavEdit = null;
+    }
+});
+
+console.log('🐣 崽崽工作台已就绪！');
