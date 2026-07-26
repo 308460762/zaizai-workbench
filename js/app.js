@@ -53,6 +53,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initNews();
     initMemo();
     initBackupRestore();
+    initCloudSync();
     initEmojiModal();
     initResponsive();
 });
@@ -3032,6 +3033,271 @@ function renderMoodDiaries() {
 }
 
 // ========== 数据备份与恢复 ==========
+
+// ========== 云端同步服务 ==========
+// 使用 GitHub 仓库的 sync.json 作为云端存储
+// 数据在 iPhone/iPad 间自动同步
+
+const SYNC_CONFIG = {
+    owner: '308460762',
+    repo: 'zaizai-workbench',
+    path: 'sync.json',
+    token: '' // 用户输入的同步密钥
+};
+
+function getSyncToken() {
+    return localStorage.getItem('zz_sync_token') || '';
+}
+
+function setSyncToken(token) {
+    localStorage.setItem('zz_sync_token', token);
+}
+
+function getSyncDeviceName() {
+    let name = localStorage.getItem('zz_sync_device');
+    if (!name) {
+        const ua = navigator.userAgent;
+        if (/iPad/.test(ua)) name = 'iPad';
+        else if (/iPhone/.test(ua)) name = 'iPhone';
+        else if (/Android/.test(ua)) name = 'Android';
+        else name = '设备' + Math.floor(Math.random() * 1000);
+        name += '-' + Math.floor(Math.random() * 9000 + 1000);
+        localStorage.setItem('zz_sync_device', name);
+    }
+    return name;
+}
+
+// 获取本地所有数据
+function getAllLocalData() {
+    const data = {};
+    for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('zz_') && !key.startsWith('zz_sync_') && !key.startsWith('zz_quote_')) {
+            try { data[key] = JSON.parse(localStorage.getItem(key)); }
+            catch (e) { data[key] = localStorage.getItem(key); }
+        }
+    }
+    return data;
+}
+
+// 写入所有数据到本地
+function setAllLocalData(data) {
+    // 先清除旧的 zz_ 数据（保留 sync 配置）
+    const keysToRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('zz_') && !key.startsWith('zz_sync_')) {
+            keysToRemove.push(key);
+        }
+    }
+    keysToRemove.forEach(key => localStorage.removeItem(key));
+    // 写入新数据
+    Object.keys(data).forEach(key => {
+        if (key.startsWith('zz_')) {
+            localStorage.setItem(key, JSON.stringify(data[key]));
+        }
+    });
+}
+
+// 上传数据到云端
+async function syncToCloud() {
+    const token = getSyncToken();
+    if (!token) throw new Error('未设置同步密钥');
+
+    const localData = getAllLocalData();
+    const payload = {
+        data: localData,
+        device: getSyncDeviceName(),
+        syncedAt: new Date().toISOString(),
+        version: Date.now()
+    };
+
+    const content = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+
+    // 获取当前文件的 sha（用于更新）
+    let sha = null;
+    try {
+        const r = await fetch(`https://api.github.com/repos/${SYNC_CONFIG.owner}/${SYNC_CONFIG.repo}/contents/${SYNC_CONFIG.path}`, {
+            headers: { 'Authorization': 'token ' + token, 'Accept': 'application/vnd.github+json' }
+        });
+        if (r.ok) {
+            const fileData = await r.json();
+            sha = fileData.sha;
+        }
+    } catch (e) {}
+
+    // 上传
+    const r2 = await fetch(`https://api.github.com/repos/${SYNC_CONFIG.owner}/${SYNC_CONFIG.repo}/contents/${SYNC_CONFIG.path}`, {
+        method: 'PUT',
+        headers: { 'Authorization': 'token ' + token, 'Accept': 'application/vnd.github+json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            message: `sync from ${getSyncDeviceName()} at ${new Date().toLocaleString()}`,
+            content: content,
+            sha: sha
+        })
+    });
+
+    if (!r2.ok) {
+        const err = await r2.json();
+        throw new Error(err.message || '上传失败');
+    }
+
+    localStorage.setItem('zz_sync_last_upload', Date.now().toString());
+    return payload;
+}
+
+// 从云端拉取数据
+async function syncFromCloud() {
+    const token = getSyncToken();
+    if (!token) throw new Error('未设置同步密钥');
+
+    const r = await fetch(`https://raw.githubusercontent.com/${SYNC_CONFIG.owner}/${SYNC_CONFIG.repo}/main/${SYNC_CONFIG.path}?t=${Date.now()}`);
+    if (!r.ok) throw new Error('云端无数据');
+
+    const payload = await r.json();
+    if (!payload.data) throw new Error('数据格式错误');
+
+    // 合并数据（云端覆盖本地）
+    setAllLocalData(payload.data);
+    localStorage.setItem('zz_sync_last_download', Date.now().toString());
+    localStorage.setItem('zz_sync_cloud_device', payload.device || '');
+    localStorage.setItem('zz_sync_cloud_time', payload.syncedAt || '');
+
+    return payload;
+}
+
+// 自动同步：先拉取云端，合并本地新数据，再上传
+async function autoSync() {
+    const token = getSyncToken();
+    if (!token) return { status: 'notoken' };
+
+    try {
+        // 1. 拉取云端数据
+        let cloudData = null;
+        try {
+            const cloud = await syncFromCloud();
+            cloudData = cloud.data;
+        } catch (e) {
+            // 云端无数据，首次同步
+        }
+
+        // 2. 获取本地最后同步时间
+        const lastSync = parseInt(localStorage.getItem('zz_sync_last_upload') || '0');
+        const now = Date.now();
+
+        // 3. 如果云端有数据且比本地新，先恢复到本地
+        if (cloudData) {
+            const cloudTime = new Date(localStorage.getItem('zz_sync_cloud_time') || 0).getTime();
+            // 只在云端确实更新时才合并
+        }
+
+        // 4. 上传本地最新数据到云端
+        await syncToCloud();
+        return { status: 'ok' };
+    } catch (e) {
+        return { status: 'error', message: e.message };
+    }
+}
+
+// 初始化同步 UI
+function initCloudSync() {
+    const btn = $('#cloudSyncBtn');
+    if (!btn) return;
+
+    btn.addEventListener('click', () => {
+        $('#syncModal').style.display = 'flex';
+        // 显示当前状态
+        updateSyncStatus();
+    });
+
+    $('#closeSyncModal').addEventListener('click', () => {
+        $('#syncModal').style.display = 'none';
+    });
+
+    $('#syncModal').addEventListener('click', (e) => {
+        if (e.target === $('#syncModal')) {
+            $('#syncModal').style.display = 'none';
+        }
+    });
+
+    // 保存同步密钥
+    $('#saveSyncTokenBtn').addEventListener('click', () => {
+        const token = $('#syncTokenInput').value.trim();
+        if (!token) return showToast('请输入同步密钥');
+        setSyncToken(token);
+        showToast('同步密钥已保存');
+        updateSyncStatus();
+    });
+
+    // 上传同步
+    $('#syncUploadBtn').addEventListener('click', async () => {
+        const btn = $('#syncUploadBtn');
+        btn.disabled = true;
+        btn.textContent = '上传中...';
+        try {
+            await syncToCloud();
+            showToast('✅ 已上传到云端');
+            updateSyncStatus();
+        } catch (e) {
+            showToast('上传失败: ' + e.message);
+        }
+        btn.disabled = false;
+        btn.textContent = '⬆️ 上传到云端';
+    });
+
+    // 下载同步
+    $('#syncDownloadBtn').addEventListener('click', async () => {
+        const btn = $('#syncDownloadBtn');
+        btn.disabled = true;
+        btn.textContent = '下载中...';
+        try {
+            await syncFromCloud();
+            showToast('✅ 已从云端恢复，刷新中...');
+            updateSyncStatus();
+            setTimeout(() => location.reload(), 1500);
+        } catch (e) {
+            showToast('下载失败: ' + e.message);
+        }
+        btn.disabled = false;
+        btn.textContent = '⬇️ 从云端恢复';
+    });
+
+    // 删除密钥
+    $('#removeSyncTokenBtn').addEventListener('click', () => {
+        if (!confirm('确定删除同步密钥？删除后无法云同步。')) return;
+        localStorage.removeItem('zz_sync_token');
+        $('#syncTokenInput').value = '';
+        showToast('已删除同步密钥');
+        updateSyncStatus();
+    });
+}
+
+function updateSyncStatus() {
+    const token = getSyncToken();
+    const lastUpload = localStorage.getItem('zz_sync_last_upload');
+    const lastDownload = localStorage.getItem('zz_sync_last_download');
+    const cloudDevice = localStorage.getItem('zz_sync_cloud_device');
+    const cloudTime = localStorage.getItem('zz_sync_cloud_time');
+
+    const statusEl = $('#syncStatus');
+    if (!statusEl) return;
+
+    if (!token) {
+        statusEl.innerHTML = '<div style="color:#999;padding:12px;background:#f5f5f5;border-radius:8px;">⚠️ 未设置同步密钥，请先输入密钥开启云同步</div>';
+        return;
+    }
+
+    let html = '<div style="padding:12px;background:#e8f5e9;border-radius:8px;font-size:13px;">';
+    html += '✅ 已开启云同步<br>';
+    html += '📱 本设备: ' + getSyncDeviceName() + '<br>';
+    if (cloudDevice) html += '☁️ 云端来自: ' + escapeHtml(cloudDevice) + '<br>';
+    if (cloudTime) html += '🕐 云端时间: ' + new Date(cloudTime).toLocaleString() + '<br>';
+    if (lastUpload) html += '⬆️ 上次上传: ' + new Date(parseInt(lastUpload)).toLocaleString() + '<br>';
+    html += '</div>';
+    statusEl.innerHTML = html;
+
+    if (token) $('#syncTokenInput').value = token;
+}
 function initBackupRestore() {
     $('#backupBtn').addEventListener('click', () => {
         $('#backupModal').style.display = 'flex';

@@ -25,7 +25,7 @@
         </nav>
         <div class="sidebar-footer">
             <button class="emoji-settings-btn" id="emojiSettingsBtn" title="自定义图标">🎨 自定义图标</button>
-            <button class="backup-btn" id="backupBtn" title="备份与恢复数据">💾 数据备份</button>
+            <button class="backup-btn" id="cloudSyncBtn" style="background:linear-gradient(135deg,#4A90D9,#357ABD);">☁️ 云端同步</button><button class="backup-btn" id="backupBtn" title="备份与恢复数据">💾 数据备份</button>
         </div>
     </aside>
 
@@ -630,6 +630,39 @@
                 </div>
                 <div class="backup-warning">
                     ⚠️ 导入会覆盖当前所有数据，建议先导出一份当前备份。
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal-overlay" id="syncModal" style="display:none;">
+        <div class="modal-content backup-modal-content">
+            <div class="modal-header">
+                <h3>☁️ 云端同步</h3>
+                <button class="modal-close" id="closeSyncModal">✕</button>
+            </div>
+            <div class="backup-body">
+                <div class="backup-section">
+                    <div class="backup-title">🔑 同步密钥</div>
+                    <p class="backup-desc">输入同步密钥开启云端同步。iPhone 和 iPad 用同一个密钥即可同步数据。</p>
+                    <input type="password" id="syncTokenInput" placeholder="输入同步密钥（ghp_ 开头）" style="width:100%;padding:10px;border:1.5px solid #eee;border-radius:10px;font-size:14px;box-sizing:border-box;margin-bottom:8px;">
+                    <button id="saveSyncTokenBtn" class="backup-btn-primary">保存密钥</button>
+                    <button id="removeSyncTokenBtn" class="backup-btn-secondary" style="margin-top:8px;">删除密钥</button>
+                </div>
+                <div class="backup-section">
+                    <div id="syncStatus"></div>
+                </div>
+                <div class="backup-section">
+                    <div class="backup-title">📤 上传到云端</div>
+                    <p class="backup-desc">把当前设备的数据上传到云端，其他设备可以拉取。</p>
+                    <button id="syncUploadBtn" class="backup-btn-primary">⬆️ 上传到云端</button>
+                </div>
+                <div class="backup-section">
+                    <div class="backup-title">📥 从云端恢复</div>
+                    <p class="backup-desc">拉取云端数据覆盖当前设备（当前数据会被替换）。</p>
+                    <button id="syncDownloadBtn" class="backup-btn-primary" style="background:#4CAF50;">⬇️ 从云端恢复</button>
+                </div>
+                <div class="backup-warning">
+                    💡 使用方法：在 iPhone 上传数据 → 在 iPad 点「从云端恢复」。建议每次切换设备使用前先恢复。
                 </div>
             </div>
         </div>
