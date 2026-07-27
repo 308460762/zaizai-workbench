@@ -630,6 +630,15 @@ button {
     flex: 1;
     font-size: 15px;
     transition: all var(--transition);
+    outline: none;
+    min-width: 0;
+    padding: 4px 2px;
+    border-radius: 4px;
+}
+
+.task-text:focus {
+    background: var(--primary-light);
+    color: var(--primary);
 }
 
 .task-text.done {

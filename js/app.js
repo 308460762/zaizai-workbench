@@ -714,7 +714,7 @@ function renderTasks(tasks) {
         list.innerHTML = tasks.map((t, i) => `
             <li class="task-item">
                 <div class="task-checkbox${t.done ? ' checked' : ''}" data-index="${i}"></div>
-                <span class="task-text${t.done ? ' done' : ''}">${escapeHtml(t.text)}</span>
+                <span class="task-text${t.done ? ' done' : ''}" contenteditable="true" data-index="${i}">${escapeHtml(t.text)}</span>
                 <button class="task-delete" data-index="${i}">🗑️</button>
             </li>
         `).join('');
@@ -738,6 +738,28 @@ function renderTasks(tasks) {
             setData('tasks', tasks);
             renderTasks(tasks);
             showToast('任务已删除');
+        });
+    });
+
+    // Inline edit
+    list.querySelectorAll('.task-text').forEach(span => {
+        span.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                span.blur();
+            }
+        });
+        span.addEventListener('blur', () => {
+            const i = parseInt(span.dataset.index);
+            const newText = span.textContent.trim();
+            if (newText && newText !== tasks[i].text) {
+                tasks[i].text = newText;
+                setData('tasks', tasks);
+                renderTasks(tasks);
+                showToast('任务已更新');
+            } else if (!newText) {
+                renderTasks(tasks);
+            }
         });
     });
 
