@@ -1103,6 +1103,19 @@ button {
     background: var(--bg-card);
 }
 
+/* 加仓合并提示，整行显示 */
+.add-holding-form #holdingMergeTip {
+    flex-basis: 100%;
+    background: rgba(255, 183, 77, 0.12);
+    border-left: 3px solid var(--warning);
+    padding: 8px 12px;
+    border-radius: var(--radius-sm);
+    line-height: 1.5;
+}
+.add-holding-form #holdingMergeTip b {
+    color: var(--warning);
+}
+
 .add-holding-form button {
     padding: 10px 20px;
     font-size: 14px;

@@ -1065,7 +1065,9 @@ function initStocks() {
     // 添加持仓表单
     $('#addHoldingBtn').addEventListener('click', () => {
         const form = $('#addHoldingForm');
-        form.style.display = form.style.display === 'none' ? 'flex' : 'none';
+        const willShow = form.style.display === 'none';
+        form.style.display = willShow ? 'flex' : 'none';
+        if (willShow) clearHoldingForm();
     });
 
     $('#cancelHoldingBtn').addEventListener('click', () => {
@@ -1097,13 +1099,43 @@ function initStocks() {
                 nameInput.value = name;
                 statusEl.textContent = `✓ 已识别：${name}`;
                 statusEl.style.color = 'var(--success)';
+                // 检测是否已存在同代码持仓，切换为「追加买入」模式
+                checkExistingHolding(type, norm.symbol, name);
             }
         } catch (e) {
             statusEl.textContent = '⚠ 找不到该代码，请检查是否正确';
             statusEl.style.color = 'var(--danger)';
             nameInput.value = '';
+            // 重置追加买入模式
+            const mergeTip = $('#holdingMergeTip');
+            if (mergeTip) {
+                mergeTip.style.display = 'none';
+                mergeTip.textContent = '';
+            }
+            const btn = $('#confirmHoldingBtn');
+            if (btn) btn.textContent = '确认添加';
         }
     });
+
+    // 检测同一持仓是否已存在，存在则切换为追加买入模式
+    function checkExistingHolding(type, symbol, name) {
+        const holdings = getData('holdings', []);
+        const existing = holdings.find(h => h.type === type && h.symbol === symbol);
+        const mergeTip = $('#holdingMergeTip');
+        const btn = $('#confirmHoldingBtn');
+        if (!mergeTip || !btn) return;
+        if (existing) {
+            const oldShares = existing.shares || 0;
+            const oldCost = existing.cost || 0;
+            mergeTip.innerHTML = `🔁 检测到已持有 <b>${name}</b>（${oldShares} 份 @ ¥${oldCost.toFixed(4)}）<br>本次将合并为加仓：份额相加、成本按加权计算、买入日取较早者`;
+            mergeTip.style.display = 'block';
+            btn.textContent = '追加买入';
+        } else {
+            mergeTip.style.display = 'none';
+            mergeTip.textContent = '';
+            btn.textContent = '确认添加';
+        }
+    }
 
     // 类型切换时清空识别结果
     $('#holdingType').addEventListener('change', () => {
@@ -1117,9 +1149,12 @@ function initStocks() {
         const shares = parseFloat($('#holdingShares').value);
         const cost = parseFloat($('#holdingCost').value);
         let price = parseFloat($('#holdingPrice').value);
+        const buyDateInput = $('#holdingBuyDate');
+        const buyDate = buyDateInput ? buyDateInput.value : '';
         if (!code || !name) return showToast('请输入代码和名称');
         if (!shares || shares <= 0) return showToast('请输入有效的持仓数量');
         if (!cost || cost <= 0) return showToast('请输入有效的成本价');
+        if (!buyDate) return showToast('请选择买入日期');
 
         const norm = normalizeStockCode(code, type);
         // 如果用户没填当前价，尝试自动获取行情作为默认值，但绝不覆盖用户输入
@@ -1136,11 +1171,44 @@ function initStocks() {
         if (!price || price <= 0) return showToast('请输入有效的当前价，或检查网络后重试');
 
         const holdings = getData('holdings', []);
+        // 检查是否已存在同代码持仓 → 合并加仓
+        const existingIdx = holdings.findIndex(h => h.type === type && h.symbol === norm.symbol);
+        if (existingIdx >= 0) {
+            const existing = holdings[existingIdx];
+            const oldShares = existing.shares || 0;
+            const oldCost = existing.cost || 0;
+            // 加权平均成本
+            const totalShares = oldShares + shares;
+            const weightedCost = (oldShares * oldCost + shares * cost) / totalShares;
+            // 买入日取较早者
+            const oldBuyDate = existing.buyDate || '';
+            const newBuyDate = (!oldBuyDate || buyDate < oldBuyDate) ? buyDate : oldBuyDate;
+            holdings[existingIdx] = {
+                ...existing,
+                shares: totalShares,
+                cost: weightedCost,
+                // 当前价取本次输入的（新行情）
+                price: price,
+                buyDate: newBuyDate,
+                updatedAt: Date.now()
+            };
+            setData('holdings', holdings);
+            updateHoldingQuotes(holdings[existingIdx]).then(() => {
+                renderProfitCalendar();
+            }).catch(() => {});
+            renderHoldings();
+            $('#addHoldingForm').style.display = 'none';
+            clearHoldingForm();
+            showToast(`已加仓 ${name}，合计 ${totalShares} 份 @ ¥${weightedCost.toFixed(4)}`);
+            return;
+        }
+
         const newHolding = {
             id: Date.now(),
             type, code, name, shares, cost, price,
             symbol: norm.symbol,
             market: norm.market,
+            buyDate: buyDate,
             createdAt: Date.now()
         };
         holdings.push(newHolding);
@@ -1241,11 +1309,27 @@ function clearHoldingForm() {
     $('#holdingShares').value = '';
     $('#holdingCost').value = '';
     $('#holdingPrice').value = '';
+    const buyDateInput = $('#holdingBuyDate');
+    if (buyDateInput) {
+        // 默认填今天，避免用户漏选
+        const today = new Date();
+        const y = today.getFullYear();
+        const m = String(today.getMonth() + 1).padStart(2, '0');
+        const d = String(today.getDate()).padStart(2, '0');
+        buyDateInput.value = `${y}-${m}-${d}`;
+    }
     const statusEl = $('#holdingCodeStatus');
     if (statusEl) {
         statusEl.textContent = '';
         statusEl.style.color = '#999';
     }
+    const mergeTip = $('#holdingMergeTip');
+    if (mergeTip) {
+        mergeTip.style.display = 'none';
+        mergeTip.textContent = '';
+    }
+    const btn = $('#confirmHoldingBtn');
+    if (btn) btn.textContent = '确认添加';
 }
 
 // ---- 持仓汇总 ----
