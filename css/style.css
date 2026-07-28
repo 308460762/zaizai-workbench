@@ -439,38 +439,9 @@ body {
     align-items: center;
 }
 
-.panel-search {
+.panel-quick-bar .quick-jump-btn {
     flex: 1;
-    display: flex;
-    align-items: center;
-    background: var(--bg-card);
-    border: 2px solid var(--border);
-    border-radius: 24px;
-    padding: 8px 14px;
-    transition: all var(--transition);
-}
-
-.panel-search:focus-within {
-    border-color: var(--primary);
-    box-shadow: 0 0 0 3px rgba(255, 107, 138, 0.1);
-}
-
-.panel-search span {
-    font-size: 16px;
-    margin-right: 6px;
-}
-
-.panel-search input {
-    border: none;
-    outline: none;
-    background: transparent;
-    font-size: 13px;
-    width: 100%;
-    color: var(--text);
-}
-
-.panel-search input::placeholder {
-    color: #ccc;
+    text-align: center;
 }
 
 .quick-jump-btn {
