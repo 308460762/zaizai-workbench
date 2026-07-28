@@ -1422,7 +1422,7 @@ function renderHoldings() {
             <div class="holding-item">
                 <div class="holding-main">
                     <div class="holding-header">
-                        <span class="holding-name" contenteditable="true" data-id="${h.id}" data-field="name">${escapeHtml(h.name)}</span>
+                        <span class="holding-name">${escapeHtml(h.name)}</span>
                         <span class="holding-type ${h.type}">${typeLabel}</span>
                         ${batchBadge}
                     </div>
@@ -1465,8 +1465,8 @@ function renderHoldings() {
     }).join('');
 
     // 统一处理可编辑字段
-    const editableFields = ['name', 'shares', 'cost', 'price'];
-    list.querySelectorAll('.holding-editable, .holding-name').forEach(el => {
+    const editableFields = ['shares', 'cost', 'price'];
+    list.querySelectorAll('.holding-editable').forEach(el => {
         const field = el.dataset.field;
         if (!editableFields.includes(field)) return;
         el.addEventListener('keydown', (e) => {
@@ -1478,10 +1478,7 @@ function renderHoldings() {
             const h = holdings.find(x => x.id === id);
             if (!h) return;
             const raw = el.textContent.trim();
-            if (field === 'name') {
-                if (!raw) return renderHoldings();
-                h.name = raw;
-            } else if (field === 'shares') {
+            if (field === 'shares') {
                 const v = parseFloat(raw);
                 if (!v || v <= 0) { showToast('请输入有效数量'); return renderHoldings(); }
                 h.shares = v;
