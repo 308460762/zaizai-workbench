@@ -1096,17 +1096,34 @@ function initStocks() {
         try {
             const norm = normalizeStockCode(code, type);
             let name = '';
+            let latestPrice = 0;
             if (type === 'fund') {
                 name = await fetchFundName(norm.symbol);
+                // 基金现价从历史净值取最新一条
+                try {
+                    const list = await loadFundJsonp(norm.symbol);
+                    if (list && list.length > 0) {
+                        const last = list[list.length - 1];
+                        latestPrice = last.nav || 0;
+                    }
+                } catch (e2) {}
             } else {
                 const quotes = await fetchTencentQuotes([norm.symbol]);
                 const q = quotes[norm.symbol];
                 if (!q || !q.name) throw new Error('找不到该股票');
                 name = q.name;
+                latestPrice = q.price || 0;
             }
             if (name) {
                 nameInput.value = name;
-                statusEl.textContent = `✓ 已识别：${name}`;
+                // 自动填入最新现价到只读框
+                const priceInput = $('#holdingPrice');
+                if (priceInput && latestPrice > 0) {
+                    priceInput.value = latestPrice.toFixed(4);
+                }
+                statusEl.textContent = latestPrice > 0
+                    ? `✓ 已识别：${name}（现价 ¥${latestPrice.toFixed(4)}）`
+                    : `✓ 已识别：${name}（现价获取中...）`;
                 statusEl.style.color = 'var(--success)';
                 // 检测是否已存在同代码持仓，切换为「追加买入」模式
                 checkExistingHolding(type, norm.symbol, name);
@@ -1167,18 +1184,29 @@ function initStocks() {
         if (!buyDate) return showToast('请选择买入日期');
 
         const norm = normalizeStockCode(code, type);
-        // 如果用户没填当前价，尝试自动获取行情作为默认值，但绝不覆盖用户输入
+        // 现价字段只读，若识别时未获取到则再次尝试（股票走行情、基金走净值）
         if (!price || price <= 0) {
             showToast('正在获取当前行情...');
             try {
-                const quotes = await fetchTencentQuotes([norm.symbol]);
-                const q = quotes[norm.symbol];
-                if (q && q.price > 0) {
-                    price = q.price;
+                if (type === 'fund') {
+                    const list = await loadFundJsonp(norm.symbol);
+                    if (list && list.length > 0) {
+                        const last = list[list.length - 1];
+                        price = last.nav || 0;
+                    }
+                } else {
+                    const quotes = await fetchTencentQuotes([norm.symbol]);
+                    const q = quotes[norm.symbol];
+                    if (q && q.price > 0) {
+                        price = q.price;
+                    }
                 }
             } catch (e) {}
         }
-        if (!price || price <= 0) return showToast('请输入有效的当前价，或检查网络后重试');
+        if (!price || price <= 0) return showToast('现价获取失败，请检查网络后重试');
+        // 把最终获取到的现价回填到只读框，让用户看到
+        const priceInputEl = $('#holdingPrice');
+        if (priceInputEl) priceInputEl.value = price.toFixed(4);
 
         const holdings = getData('holdings', []);
         // 检查是否已存在同代码持仓 → 新增一批买入记录（保留历史，不抹平）
@@ -1318,10 +1346,33 @@ function initStocks() {
     updateRecordHoldingOptions();
     renderRecords();
 
-    // 首次加载自动刷新行情
+    // 首次加载自动刷新行情，并按天/交易时段定时刷新
     setTimeout(() => {
         refreshAllHoldingsQuotes();
     }, 1000);
+    // 定时刷新：交易时段每 5 分钟一次，非交易时段每小时检查一次
+    setInterval(() => {
+        const now = new Date();
+        const h = now.getHours();
+        const m = now.getMinutes();
+        const dow = now.getDay();
+        const isWeekday = dow !== 0 && dow !== 6;
+        // A 股交易时段 9:30-11:30, 13:00-15:00
+        const inTrading = isWeekday && (
+            (h === 9 && m >= 30) || (h === 10) || (h === 11 && m <= 30) ||
+            (h === 13) || (h === 14) || (h === 15 && m === 0)
+        );
+        if (inTrading) {
+            refreshAllHoldingsQuotes();
+        } else {
+            // 非交易时段：若当天还没刷新过则刷新一次
+            const todayStr = formatLocalDate(now);
+            const lastRefresh = localStorage.getItem('zz_last_quote_refresh_date');
+            if (lastRefresh !== todayStr) {
+                refreshAllHoldingsQuotes();
+            }
+        }
+    }, 5 * 60 * 1000);
 }
 
 function clearHoldingForm() {
@@ -1438,7 +1489,7 @@ function renderHoldings() {
                         </div>
                         <div class="stat-item">
                             <span class="stat-label">现价</span>
-                            <span class="stat-value current-price holding-editable" data-id="${h.id}" data-field="price" contenteditable="true">${h.price.toFixed(4)}</span>
+                            <span class="stat-value current-price holding-price-readonly" data-id="${h.id}" data-field="price" title="长按可修正">${h.price.toFixed(4)}</span>
                         </div>
                         <div class="stat-item">
                             <span class="stat-label">买入日${batchCount > 1 ? '(最早)' : ''}</span>
@@ -1464,8 +1515,8 @@ function renderHoldings() {
         `;
     }).join('');
 
-    // 统一处理可编辑字段
-    const editableFields = ['shares', 'cost', 'price'];
+    // 统一处理可编辑字段（现价只读，由系统自动更新）
+    const editableFields = ['shares', 'cost'];
     list.querySelectorAll('.holding-editable').forEach(el => {
         const field = el.dataset.field;
         if (!editableFields.includes(field)) return;
@@ -1486,11 +1537,11 @@ function renderHoldings() {
                 if (Array.isArray(h.batches) && h.batches.length === 1) {
                     h.batches[0].shares = v;
                 }
-            } else if (field === 'cost' || field === 'price') {
+            } else if (field === 'cost') {
                 const v = parseFloat(raw);
                 if (!v || v <= 0) { showToast('请输入有效价格'); return renderHoldings(); }
-                h[field] = v;
-                if (field === 'cost' && Array.isArray(h.batches) && h.batches.length === 1) {
+                h.cost = v;
+                if (Array.isArray(h.batches) && h.batches.length === 1) {
                     h.batches[0].cost = v;
                 }
             }
@@ -1575,6 +1626,7 @@ async function refreshAllHoldingsQuotes() {
     renderHoldings();
     renderProfitCalendar();
     if (status) status.textContent = '行情已更新 ' + new Date().toLocaleTimeString();
+    localStorage.setItem('zz_last_quote_refresh_date', formatLocalDate(new Date()));
 }
 
 function renderProfitCalendar() {
