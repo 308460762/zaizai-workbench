@@ -234,6 +234,25 @@ async function fetchTencentKline(symbol, start, end) {
     }
 }
 
+// JSONP 获取基金名称
+function fetchFundName(code) {
+    return new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = `https://fund.eastmoney.com/pingzhongdata/${code}.js?v=${Date.now()}`;
+        script.onload = () => {
+            document.body.removeChild(script);
+            const name = window.fS_name;
+            if (name) resolve(name);
+            else reject(new Error('找不到该基金'));
+        };
+        script.onerror = () => {
+            document.body.removeChild(script);
+            reject(new Error('加载失败'));
+        };
+        document.body.appendChild(script);
+    });
+}
+
 // JSONP 加载天天基金历史净值
 function loadFundJsonp(code) {
     return new Promise((resolve, reject) => {
@@ -1044,6 +1063,43 @@ function initStocks() {
         clearHoldingForm();
     });
 
+    // 代码失焦自动识别名称
+    $('#holdingCode').addEventListener('blur', async () => {
+        const code = $('#holdingCode').value.trim();
+        const type = $('#holdingType').value;
+        const statusEl = $('#holdingCodeStatus');
+        const nameInput = $('#holdingName');
+        if (!code) return;
+        statusEl.textContent = '正在识别...';
+        statusEl.style.color = '#999';
+        try {
+            const norm = normalizeStockCode(code, type);
+            let name = '';
+            if (type === 'fund') {
+                name = await fetchFundName(norm.symbol);
+            } else {
+                const quotes = await fetchTencentQuotes([norm.symbol]);
+                const q = quotes[norm.symbol];
+                if (!q || !q.name) throw new Error('找不到该股票');
+                name = q.name;
+            }
+            if (name) {
+                nameInput.value = name;
+                statusEl.textContent = `✓ 已识别：${name}`;
+                statusEl.style.color = 'var(--success)';
+            }
+        } catch (e) {
+            statusEl.textContent = '⚠ 找不到该代码，请检查是否正确';
+            statusEl.style.color = 'var(--danger)';
+            nameInput.value = '';
+        }
+    });
+
+    // 类型切换时清空识别结果
+    $('#holdingType').addEventListener('change', () => {
+        $('#holdingCodeStatus').textContent = '';
+    });
+
     $('#confirmHoldingBtn').addEventListener('click', async () => {
         const type = $('#holdingType').value;
         const code = $('#holdingCode').value.trim();
@@ -1187,6 +1243,11 @@ function clearHoldingForm() {
     $('#holdingShares').value = '';
     $('#holdingCost').value = '';
     $('#holdingPrice').value = '';
+    const statusEl = $('#holdingCodeStatus');
+    if (statusEl) {
+        statusEl.textContent = '';
+        statusEl.style.color = '#999';
+    }
 }
 
 // ---- 持仓汇总 ----
