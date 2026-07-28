@@ -389,6 +389,15 @@ function syncHoldingBuyDates() {
             h.market = norm.market;
             changed = true;
         }
+        // 一次性迁移：为没有 batches 的老持仓补全首批记录
+        if (!Array.isArray(h.batches) || h.batches.length === 0) {
+            h.batches = [{
+                shares: h.shares || 0,
+                cost: h.cost || 0,
+                buyDate: h.buyDate || (h.createdAt ? formatLocalDate(new Date(h.createdAt)) : null)
+            }];
+            changed = true;
+        }
     });
     if (changed) setData('holdings', holdings);
     return holdings;
@@ -1127,7 +1136,8 @@ function initStocks() {
         if (existing) {
             const oldShares = existing.shares || 0;
             const oldCost = existing.cost || 0;
-            mergeTip.innerHTML = `🔁 检测到已持有 <b>${name}</b>（${oldShares} 份 @ ¥${oldCost.toFixed(4)}）<br>本次将合并为加仓：份额相加、成本按加权计算、买入日取较早者`;
+            const batchCount = (Array.isArray(existing.batches) && existing.batches.length) ? existing.batches.length : 1;
+            mergeTip.innerHTML = `🔁 检测到已持有 <b>${name}</b>（${oldShares} 份 @ ¥${oldCost.toFixed(4)}，共 ${batchCount} 批）<br>本次将作为<b>新增一批</b>买入记录，保留各自买入价和日期，收益按每批独立计算`;
             mergeTip.style.display = 'block';
             btn.textContent = '追加买入';
         } else {
@@ -1171,35 +1181,44 @@ function initStocks() {
         if (!price || price <= 0) return showToast('请输入有效的当前价，或检查网络后重试');
 
         const holdings = getData('holdings', []);
-        // 检查是否已存在同代码持仓 → 合并加仓
+        // 检查是否已存在同代码持仓 → 新增一批买入记录（保留历史，不抹平）
         const existingIdx = holdings.findIndex(h => h.type === type && h.symbol === norm.symbol);
         if (existingIdx >= 0) {
             const existing = holdings[existingIdx];
-            const oldShares = existing.shares || 0;
-            const oldCost = existing.cost || 0;
-            // 加权平均成本
-            const totalShares = oldShares + shares;
-            const weightedCost = (oldShares * oldCost + shares * cost) / totalShares;
-            // 买入日取较早者
-            const oldBuyDate = existing.buyDate || '';
-            const newBuyDate = (!oldBuyDate || buyDate < oldBuyDate) ? buyDate : oldBuyDate;
-            holdings[existingIdx] = {
-                ...existing,
-                shares: totalShares,
-                cost: weightedCost,
-                // 当前价取本次输入的（新行情）
-                price: price,
-                buyDate: newBuyDate,
-                updatedAt: Date.now()
+            const newBatch = {
+                shares: shares,
+                cost: cost,
+                buyDate: buyDate,
+                addedAt: Date.now()
             };
+            // 兼容老数据：若没有 batches，先把现有数据作为首批
+            if (!Array.isArray(existing.batches) || existing.batches.length === 0) {
+                existing.batches = [{
+                    shares: existing.shares || 0,
+                    cost: existing.cost || 0,
+                    buyDate: existing.buyDate || (existing.createdAt ? formatLocalDate(new Date(existing.createdAt)) : buyDate)
+                }];
+            }
+            existing.batches.push(newBatch);
+            // 当前价取本次输入的（最新行情）
+            existing.price = price;
+            // 汇总字段（向后兼容读取这些字段的地方）
+            existing.shares = existing.batches.reduce((s, b) => s + (b.shares || 0), 0);
+            existing.cost = existing.batches.reduce((sum, b) => sum + (b.shares || 0) * (b.cost || 0), 0) / existing.shares;
+            existing.buyDate = existing.batches
+                .map(b => b.buyDate)
+                .filter(Boolean)
+                .sort()[0];
+            existing.updatedAt = Date.now();
             setData('holdings', holdings);
-            updateHoldingQuotes(holdings[existingIdx]).then(() => {
+            updateHoldingQuotes(existing).then(() => {
                 renderProfitCalendar();
             }).catch(() => {});
             renderHoldings();
             $('#addHoldingForm').style.display = 'none';
             clearHoldingForm();
-            showToast(`已加仓 ${name}，合计 ${totalShares} 份 @ ¥${weightedCost.toFixed(4)}`);
+            const batchCount = existing.batches.length;
+            showToast(`已加仓第 ${batchCount} 批 ${name}，合计 ${existing.shares} 份`);
             return;
         }
 
@@ -1209,6 +1228,7 @@ function initStocks() {
             symbol: norm.symbol,
             market: norm.market,
             buyDate: buyDate,
+            batches: [{ shares: shares, cost: cost, buyDate: buyDate, addedAt: Date.now() }],
             createdAt: Date.now()
         };
         holdings.push(newHolding);
@@ -1345,6 +1365,28 @@ function calcHoldingSummary(holdings) {
     return { totalMarketValue, totalProfit, todayProfit: totalProfit };
 }
 
+function renderBatchDetails(h) {
+    const batches = Array.isArray(h.batches) ? h.batches : [];
+    const rows = batches.map((b, i) => {
+        const shares = b.shares || 0;
+        const cost = b.cost || 0;
+        const buyDate = b.buyDate || '—';
+        const batchMarketValue = shares * h.price;
+        const batchProfit = batchMarketValue - shares * cost;
+        const isUp = batchProfit >= 0;
+        return `
+            <div class="batch-row">
+                <span class="batch-no">第${i + 1}批</span>
+                <span class="batch-shares">${shares}份</span>
+                <span class="batch-cost">@¥${cost.toFixed(4)}</span>
+                <span class="batch-date">${buyDate}</span>
+                <span class="batch-profit ${isUp ? 'profit-up' : 'profit-down'}">${isUp ? '+' : ''}¥${batchProfit.toFixed(2)}</span>
+            </div>
+        `;
+    }).join('');
+    return `<div class="holding-batches">${rows}</div>`;
+}
+
 function renderHoldings() {
     const holdings = getData('holdings', []);
     const summary = calcHoldingSummary(holdings);
@@ -1371,21 +1413,26 @@ function renderHoldings() {
         const isUp = profit >= 0;
         const typeLabel = h.type === 'fund' ? '基金' : '股票';
         const buyDateStr = h.buyDate || formatLocalDate(new Date(h.createdAt));
+        const batchCount = (Array.isArray(h.batches) && h.batches.length) ? h.batches.length : 1;
+        const batchBadge = batchCount > 1
+            ? `<span class="holding-batch-badge" title="共 ${batchCount} 批买入">📦 ${batchCount}批</span>`
+            : '';
         return `
             <div class="holding-item">
                 <div class="holding-main">
                     <div class="holding-header">
                         <span class="holding-name" contenteditable="true" data-id="${h.id}" data-field="name">${escapeHtml(h.name)}</span>
                         <span class="holding-type ${h.type}">${typeLabel}</span>
+                        ${batchBadge}
                     </div>
                     <div class="holding-code" contenteditable="true" data-id="${h.id}" data-field="code">${escapeHtml(h.code)}</div>
                     <div class="holding-stats">
                         <div class="stat-item">
-                            <span class="stat-label">持仓</span>
+                            <span class="stat-label">持仓${batchCount > 1 ? '合计' : ''}</span>
                             <span class="stat-value holding-editable" contenteditable="true" data-id="${h.id}" data-field="shares">${h.shares}</span>
                         </div>
                         <div class="stat-item">
-                            <span class="stat-label">成本</span>
+                            <span class="stat-label">成本${batchCount > 1 ? '加权' : ''}</span>
                             <span class="stat-value holding-editable" contenteditable="true" data-id="${h.id}" data-field="cost">${h.cost.toFixed(4)}</span>
                         </div>
                         <div class="stat-item">
@@ -1393,14 +1440,15 @@ function renderHoldings() {
                             <span class="stat-value current-price holding-editable" data-id="${h.id}" data-field="price" contenteditable="true">${h.price.toFixed(4)}</span>
                         </div>
                         <div class="stat-item">
-                            <span class="stat-label">买入日</span>
-                            <input type="date" class="holding-date-input" data-id="${h.id}" value="${buyDateStr}">
+                            <span class="stat-label">买入日${batchCount > 1 ? '(最早)' : ''}</span>
+                            <input type="date" class="holding-date-input" data-id="${h.id}" value="${buyDateStr}"${batchCount > 1 ? ' disabled' : ''}>
                         </div>
                         <div class="stat-item">
                             <span class="stat-label">市值</span>
                             <span class="stat-value">¥${marketValue.toFixed(2)}</span>
                         </div>
                     </div>
+                    ${batchCount > 1 ? renderBatchDetails(h) : ''}
                 </div>
                 <div class="holding-right">
                     <div class="holding-profit ${isUp ? 'profit-up' : 'profit-down'}">
@@ -1442,10 +1490,17 @@ function renderHoldings() {
                 const v = parseFloat(raw);
                 if (!v || v <= 0) { showToast('请输入有效数量'); return renderHoldings(); }
                 h.shares = v;
+                // 同步到首批（仅单批持仓时有效；多批时该字段已 disabled）
+                if (Array.isArray(h.batches) && h.batches.length === 1) {
+                    h.batches[0].shares = v;
+                }
             } else if (field === 'cost' || field === 'price') {
                 const v = parseFloat(raw);
                 if (!v || v <= 0) { showToast('请输入有效价格'); return renderHoldings(); }
                 h[field] = v;
+                if (field === 'cost' && Array.isArray(h.batches) && h.batches.length === 1) {
+                    h.batches[0].cost = v;
+                }
             }
             setData('holdings', holdings);
             renderHoldings();
@@ -1453,14 +1508,18 @@ function renderHoldings() {
         });
     });
 
-    // 买入日期选择
+    // 买入日期选择（仅单批可编辑；多批时 disabled）
     list.querySelectorAll('.holding-date-input').forEach(inp => {
+        if (inp.disabled) return;
         inp.addEventListener('change', () => {
             const id = parseInt(inp.dataset.id);
             const holdings = getData('holdings', []);
             const h = holdings.find(x => x.id === id);
             if (h) {
                 h.buyDate = inp.value;
+                if (Array.isArray(h.batches) && h.batches.length === 1) {
+                    h.batches[0].buyDate = inp.value;
+                }
                 setData('holdings', holdings);
                 renderHoldings();
                 showToast('买入日期已更新');
@@ -1598,9 +1657,14 @@ function getDailyProfit(holding, year, month, day) {
     const dow = date.getDay();
     const dateStr = formatDateStr(date);
 
-    // 买入日期判断（用字符串比较，避免时区问题）
-    const buyDateStr = holding.buyDate || (holding.createdAt ? formatLocalDate(new Date(holding.createdAt)) : null);
-    if (buyDateStr && dateStr < buyDateStr) return { value: 0, status: 'before' };
+    // 兼容老数据：没有 batches 时按单批处理
+    const batches = (Array.isArray(holding.batches) && holding.batches.length > 0)
+        ? holding.batches
+        : [{
+            shares: holding.shares || 0,
+            cost: holding.cost || 0,
+            buyDate: holding.buyDate || (holding.createdAt ? formatLocalDate(new Date(holding.createdAt)) : null)
+        }];
 
     // 周末休市
     if (dow === 0 || dow === 6) return { value: 0, status: 'weekend' };
@@ -1610,32 +1674,36 @@ function getDailyProfit(holding, year, month, day) {
     const price = getClosePrice(symbol, dateStr);
     if (price === null) return { value: 0, status: 'nodata' };
 
-    // 判断是否是买入当天
-    const isBuyDay = buyDateStr && dateStr === buyDateStr;
+    // 找前一日收盘价（所有批次共用同一标的前一日价）
+    const prevDate = new Date(date);
+    prevDate.setDate(prevDate.getDate() - 1);
+    let marketPrevPrice = null;
+    for (let i = 0; i < 10; i++) {
+        const pd = new Date(prevDate);
+        pd.setDate(pd.getDate() - i);
+        const p = getClosePrice(symbol, formatDateStr(pd));
+        if (p !== null) { marketPrevPrice = p; break; }
+    }
 
-    let prevPrice = null;
-    if (isBuyDay) {
-        // 买入当天用成本价作为基准
-        prevPrice = holding.cost;
-    } else {
-        // 获取前一日收盘价
-        const prevDate = new Date(date);
-        prevDate.setDate(prevDate.getDate() - 1);
-        // 向前查找最近一个交易日
-        for (let i = 0; i < 10; i++) {
-            const pd = new Date(prevDate);
-            pd.setDate(pd.getDate() - i);
-            const p = getClosePrice(symbol, formatDateStr(pd));
-            if (p !== null) { prevPrice = p; break; }
+    // 逐批计算，每批用自己的 buyDate 和 cost 作为买入当天基准
+    let totalValue = 0;
+    let hasBefore = false;   // 全部批次都在买入日之前
+    let hasActive = false;   // 至少一批在持仓中
+    batches.forEach(b => {
+        const bBuyDate = b.buyDate || null;
+        if (bBuyDate && dateStr < bBuyDate) {
+            hasBefore = true;
+            return; // 这批还没买入，当日收益 0
         }
-    }
+        hasActive = true;
+        const isBuyDay = bBuyDate && dateStr === bBuyDate;
+        const prevPrice = isBuyDay ? (b.cost || 0) : (marketPrevPrice !== null ? marketPrevPrice : (b.cost || 0));
+        totalValue += (b.shares || 0) * (price - prevPrice);
+    });
 
-    if (prevPrice === null) {
-        prevPrice = holding.cost;
-    }
-
-    const change = holding.shares * (price - prevPrice);
-    return { value: change, status: 'ok' };
+    // 所有批次都还没买入 → before
+    if (!hasActive) return { value: 0, status: 'before' };
+    return { value: totalValue, status: 'ok' };
 }
 
 function renderDayCalendar(year, month, holdings, calendarEl) {

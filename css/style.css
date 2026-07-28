@@ -1116,6 +1116,46 @@ button {
     color: var(--warning);
 }
 
+/* 持仓批次徽标 */
+.holding-batch-badge {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: rgba(79, 195, 247, 0.18);
+    color: #29B6F6;
+    margin-left: auto;
+}
+
+/* 持仓批次明细 */
+.holding-batches {
+    margin-top: 8px;
+    padding: 8px 10px;
+    background: rgba(0, 0, 0, 0.03);
+    border-radius: var(--radius-sm);
+    border-left: 3px solid var(--primary);
+}
+.batch-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    font-size: 12px;
+    padding: 3px 0;
+    color: var(--text-secondary);
+}
+.batch-row:not(:last-child) {
+    border-bottom: 1px dashed rgba(0, 0, 0, 0.08);
+    margin-bottom: 2px;
+}
+.batch-no {
+    color: var(--primary);
+    font-weight: 600;
+    min-width: 44px;
+}
+.batch-shares { min-width: 60px; }
+.batch-cost { min-width: 80px; color: var(--text-secondary); }
+.batch-date { min-width: 90px; color: var(--text-secondary); }
+.batch-profit { margin-left: auto; font-weight: 600; }
+
 .add-holding-form button {
     padding: 10px 20px;
     font-size: 14px;
