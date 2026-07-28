@@ -134,11 +134,14 @@ function normalizeStockCode(code, type) {
     // 移除已有的前缀
     code = code.replace(/^(sh|sz|bj|hk)/, '');
     if (type === 'fund') {
-        // 场内基金：ETF/LOF 代码一般以 15/16/18/50/51/52/56/58/16 开头
+        // 场外基金代码统一补零到 6 位（天天基金接口要求）
+        if (!/^(15|16|18|50|51|52|56|58)/.test(code)) {
+            code = code.padStart(6, '0');
+            return { market: 'fund', symbol: code };
+        }
+        // 场内基金：ETF/LOF 代码一般以 15/16/18/50/51/52/56/58 开头
         if (/^(15|16|18|50|51|52|56|58)/.test(code)) return { market: 'tencent', symbol: 'sh' + code };
-        if (/^(15|16|18)/.test(code)) return { market: 'tencent', symbol: 'sz' + code };
-        // 其他视为场外基金，走天天基金
-        return { market: 'fund', symbol: code };
+        return { market: 'tencent', symbol: 'sz' + code };
     }
     // 股票
     if (/^6/.test(code) || /^68/.test(code) || /^8/.test(code) || /^9/.test(code)) {
@@ -340,7 +343,7 @@ function getHoldingBuyDate(holdingId) {
     return buys[0].date;
 }
 
-// 给所有持仓补 buyDate
+// 给所有持仓补 buyDate，并补全 symbol/market
 function syncHoldingBuyDates() {
     const holdings = getData('holdings', []);
     let changed = false;
@@ -348,6 +351,13 @@ function syncHoldingBuyDates() {
         const buyDate = getHoldingBuyDate(h.id) || (h.createdAt ? formatLocalDate(new Date(h.createdAt)) : null);
         if (buyDate && h.buyDate !== buyDate) {
             h.buyDate = buyDate;
+            changed = true;
+        }
+        // 补全/修正 symbol 和 market（基金代码自动补零）
+        const norm = normalizeStockCode(h.code, h.type);
+        if (!h.symbol || h.symbol !== norm.symbol || !h.market || h.market !== norm.market) {
+            h.symbol = norm.symbol;
+            h.market = norm.market;
             changed = true;
         }
     });
@@ -1111,6 +1121,8 @@ function initStocks() {
     });
 
     // 交易记录
+    $('#recordHolding').addEventListener('change', fillRecordFromHolding);
+
     $('#addRecordBtn').addEventListener('click', () => {
         const type = $('#recordType').value;
         const holdingId = parseInt($('#recordHolding').value);
@@ -1130,24 +1142,14 @@ function initStocks() {
         });
         setData('records', records);
 
-        // 如果是买入，更新持仓数量、成本和买入日期
+        // 同步持仓的最早买入日期（不修改份额和成本，以持仓页面填写的为准）
         const holdings = getData('holdings', []);
         const h = holdings.find(h => h.id === holdingId);
-        if (h) {
-            if (type === 'buy') {
-                const totalCost = h.shares * h.cost + shares * price;
-                h.shares += shares;
-                h.cost = totalCost / h.shares;
-                // 同步最早买入日期
-                const records = getData('records', []);
-                const buys = records.filter(r => r.holdingId === holdingId && r.type === 'buy');
-                buys.sort((a, b) => new Date(a.date) - new Date(b.date));
-                if (buys.length > 0) h.buyDate = buys[0].date;
-            } else if (type === 'sell') {
-                h.shares = Math.max(0, h.shares - shares);
-            }
+        if (h && type === 'buy') {
+            const buys = records.filter(r => r.holdingId === holdingId && r.type === 'buy');
+            buys.sort((a, b) => new Date(a.date) - new Date(b.date));
+            if (buys.length > 0) h.buyDate = buys[0].date;
             setData('holdings', holdings);
-            renderHoldings();
         }
 
         renderRecords();
@@ -1759,6 +1761,20 @@ function updateRecordHoldingOptions() {
         select.innerHTML = holdings.map(h =>
             `<option value="${h.id}">${escapeHtml(h.name)} (${escapeHtml(h.code)})</option>`
         ).join('');
+    }
+    fillRecordFromHolding();
+}
+
+function fillRecordFromHolding() {
+    const holdingId = parseInt($('#recordHolding').value);
+    const holdings = getData('holdings', []);
+    const h = holdings.find(x => x.id === holdingId);
+    if (h) {
+        $('#recordShares').value = h.shares;
+        $('#recordPrice').value = h.cost.toFixed(4);
+    } else {
+        $('#recordShares').value = '';
+        $('#recordPrice').value = '';
     }
 }
 
