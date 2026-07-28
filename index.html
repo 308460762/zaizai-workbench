@@ -243,9 +243,14 @@
                 </div>
 
                 <!-- 收益明细 -->
-                                <div class="stock-panel" id="stockPanel-profit">
+                <div class="stock-panel" id="stockPanel-profit">
+                    <div class="profit-type-tabs">
+                        <button class="profit-type active" data-type="all">全部</button>
+                        <button class="profit-type" data-type="stock">📈 股票</button>
+                        <button class="profit-type" data-type="fund">💰 基金</button>
+                    </div>
                     <div class="profit-calendar-header">
-                        <span>收益日历</span>
+                        <span id="profitCalendarLabel">收益日历</span>
                         <div class="profit-period-tabs">
                             <button class="profit-period active" data-period="day">日</button>
                             <button class="profit-period" data-period="month">月</button>
@@ -260,18 +265,6 @@
                     <div class="profit-calendar-toolbar" style="padding: 8px 16px; display: flex; justify-content: space-between; align-items: center;">
                         <span id="quoteStatus" style="font-size: 12px; color: #999;">点击刷新获取最新行情</span>
                         <button id="refreshQuotesBtn" style="background: #FF6B8A; color: #fff; border: none; border-radius: 8px; padding: 6px 12px; font-size: 13px; font-weight: 600;">🔄 刷新行情</button>
-                    </div>
-                    <div class="profit-calendar" id="profitCalendar"></div>
-                    <div class="profit-detail-header">
-                        <span id="profitDetailTitle">当日收益明细</span>
-                        <span id="profitDetailTotal">¥0.00</span>
-                    </div>
-                    <div class="profit-detail-list" id="profitDetailList"></div>
-                </div>
-                    <div class="profit-calendar-nav">
-                        <button id="profitPrev">◀</button>
-                        <span id="profitTitle">2026年7月</span>
-                        <button id="profitNext">▶</button>
                     </div>
                     <div class="profit-calendar" id="profitCalendar"></div>
                     <div class="profit-detail-header">

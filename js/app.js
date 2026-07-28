@@ -320,6 +320,30 @@ function isMarketClosed(date, symbol) {
     return false;
 }
 
+// 获取持仓最早买入日期（从交易记录）
+function getHoldingBuyDate(holdingId) {
+    const records = getData('records', []);
+    const buys = records.filter(r => r.holdingId === holdingId && r.type === 'buy');
+    if (buys.length === 0) return null;
+    buys.sort((a, b) => new Date(a.date) - new Date(b.date));
+    return buys[0].date;
+}
+
+// 给所有持仓补 buyDate
+function syncHoldingBuyDates() {
+    const holdings = getData('holdings', []);
+    let changed = false;
+    holdings.forEach(h => {
+        const buyDate = getHoldingBuyDate(h.id) || (h.createdAt ? formatLocalDate(new Date(h.createdAt)) : null);
+        if (buyDate && h.buyDate !== buyDate) {
+            h.buyDate = buyDate;
+            changed = true;
+        }
+    });
+    if (changed) setData('holdings', holdings);
+    return holdings;
+}
+
 
 function formatDate(d) {
     const y = d.getFullYear();
@@ -962,6 +986,7 @@ function renderTransactions(transactions) {
 // ========== 股票基金 ==========
 APP.stockTab = 'holdings';
 APP.profitPeriod = 'day';
+APP.profitType = 'all';
 APP.profitDate = new Date();
 APP.profitSelectedDate = new Date(); // 选中的日期/月份/年份
 
@@ -1055,6 +1080,18 @@ function initStocks() {
         });
     });
 
+    // 收益明细 - 类型切换（全部/股票/基金）
+    $$('.profit-type').forEach(btn => {
+        btn.addEventListener('click', () => {
+            $$('.profit-type').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            APP.profitType = btn.dataset.type;
+            APP.profitDate = new Date();
+            APP.profitSelectedDate = new Date();
+            renderProfitCalendar();
+        });
+    });
+
     // 收益明细 - 前后导航
     $('#profitPrev').addEventListener('click', () => {
         navigateProfit(-1);
@@ -1083,7 +1120,7 @@ function initStocks() {
         });
         setData('records', records);
 
-        // 如果是买入，更新持仓数量和成本
+        // 如果是买入，更新持仓数量、成本和买入日期
         const holdings = getData('holdings', []);
         const h = holdings.find(h => h.id === holdingId);
         if (h) {
@@ -1091,6 +1128,11 @@ function initStocks() {
                 const totalCost = h.shares * h.cost + shares * price;
                 h.shares += shares;
                 h.cost = totalCost / h.shares;
+                // 同步最早买入日期
+                const records = getData('records', []);
+                const buys = records.filter(r => r.holdingId === holdingId && r.type === 'buy');
+                buys.sort((a, b) => new Date(a.date) - new Date(b.date));
+                if (buys.length > 0) h.buyDate = buys[0].date;
             } else if (type === 'sell') {
                 h.shares = Math.max(0, h.shares - shares);
             }
@@ -1298,6 +1340,7 @@ async function refreshAllHoldingsQuotes() {
 }
 
 function renderProfitCalendar() {
+    syncHoldingBuyDates();
     let holdings = getData('holdings', []);
     const period = APP.profitPeriod;
     const d = APP.profitDate;
@@ -1328,14 +1371,28 @@ function renderProfitCalendar() {
         return;
     }
 
+    // 按类型过滤
+    const typeFilter = APP.profitType;
+    if (typeFilter === 'stock') {
+        holdings = holdings.filter(h => h.type !== 'fund');
+        $('#profitCalendarLabel').textContent = '股票收益日历';
+    } else if (typeFilter === 'fund') {
+        holdings = holdings.filter(h => h.type === 'fund');
+        $('#profitCalendarLabel').textContent = '基金收益日历';
+    } else {
+        $('#profitCalendarLabel').textContent = '收益日历';
+    }
+
     if (period === 'day') {
         const year = d.getFullYear();
         const month = d.getMonth();
         titleEl.textContent = `${year}年${month + 1}月`;
         renderDayCalendar(year, month, holdings, calendarEl);
-        // 默认选中今天或当月第一天
-        const today = new Date();
-        const selectedDay = (year === today.getFullYear() && month === today.getMonth()) ? today.getDate() : 1;
+        // 使用已选中的日期，不在当前月则回退到当月第一天
+        const selected = APP.profitSelectedDate || new Date();
+        const selectedDay = (selected.getFullYear() === year && selected.getMonth() === month)
+            ? selected.getDate()
+            : 1;
         renderProfitDetail('day', year, month, selectedDay, holdings, detailTitleEl, detailTotalEl, detailListEl);
     } else if (period === 'month') {
         const year = d.getFullYear();
@@ -1356,8 +1413,9 @@ function getDailyProfit(holding, year, month, day) {
 
     // 买入日期判断
     let buyDayStart = null;
-    if (holding.createdAt) {
-        const buyDate = new Date(holding.createdAt);
+    const buyDateStr = holding.buyDate || (holding.createdAt ? formatLocalDate(new Date(holding.createdAt)) : null);
+    if (buyDateStr) {
+        const buyDate = new Date(buyDateStr + 'T00:00:00');
         buyDayStart = new Date(buyDate.getFullYear(), buyDate.getMonth(), buyDate.getDate());
         const thisDayStart = new Date(year, month, day);
         if (thisDayStart < buyDayStart) return { value: 0, status: 'before' };
@@ -1453,9 +1511,13 @@ function renderDayCalendar(year, month, holdings, calendarEl) {
             const y = parseInt(el.dataset.year);
             const m = parseInt(el.dataset.month);
             const day = parseInt(el.dataset.day);
+            APP.profitSelectedDate = new Date(y, m, day);
             calendarEl.querySelectorAll('.profit-day').forEach(d => d.classList.remove('selected'));
             el.classList.add('selected');
-            const holdings = getData('holdings', []);
+            // 按当前类型过滤持仓
+            let holdings = getData('holdings', []);
+            if (APP.profitType === 'stock') holdings = holdings.filter(h => h.type !== 'fund');
+            if (APP.profitType === 'fund') holdings = holdings.filter(h => h.type === 'fund');
             renderProfitDetail('day', y, m, day, holdings, $('#profitDetailTitle'), $('#profitDetailTotal'), $('#profitDetailList'));
         });
     });
