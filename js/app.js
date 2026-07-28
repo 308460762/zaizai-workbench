@@ -1425,7 +1425,7 @@ function renderHoldings() {
                         <span class="holding-type ${h.type}">${typeLabel}</span>
                         ${batchBadge}
                     </div>
-                    <div class="holding-code" contenteditable="true" data-id="${h.id}" data-field="code">${escapeHtml(h.code)}</div>
+                    <div class="holding-code">${escapeHtml(h.code)}</div>
                     <div class="holding-stats">
                         <div class="stat-item">
                             <span class="stat-label">持仓${batchCount > 1 ? '合计' : ''}</span>
@@ -1464,8 +1464,8 @@ function renderHoldings() {
     }).join('');
 
     // 统一处理可编辑字段
-    const editableFields = ['name', 'code', 'shares', 'cost', 'price'];
-    list.querySelectorAll('.holding-editable, .holding-name, .holding-code').forEach(el => {
+    const editableFields = ['name', 'shares', 'cost', 'price'];
+    list.querySelectorAll('.holding-editable, .holding-name').forEach(el => {
         const field = el.dataset.field;
         if (!editableFields.includes(field)) return;
         el.addEventListener('keydown', (e) => {
@@ -1480,12 +1480,6 @@ function renderHoldings() {
             if (field === 'name') {
                 if (!raw) return renderHoldings();
                 h.name = raw;
-            } else if (field === 'code') {
-                if (!raw) return renderHoldings();
-                h.code = raw;
-                const norm = normalizeStockCode(raw, h.type);
-                h.symbol = norm.symbol;
-                h.market = norm.market;
             } else if (field === 'shares') {
                 const v = parseFloat(raw);
                 if (!v || v <= 0) { showToast('请输入有效数量'); return renderHoldings(); }
