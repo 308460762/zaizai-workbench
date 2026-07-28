@@ -362,16 +362,26 @@ function getHoldingBuyDate(holdingId) {
     return buys[0].date;
 }
 
-// 给所有持仓补 buyDate，并补全 symbol/market
+// 修复被交易记录污染的错误买入日期（一次性）
+function fixInvalidBuyDates() {
+    const today = formatLocalDate(new Date());
+    const holdings = getData('holdings', []);
+    let changed = false;
+    holdings.forEach(h => {
+        if (h.buyDate && h.buyDate > today) {
+            // 如果买入日是未来日期，明显错误，清空让用户重新设置
+            delete h.buyDate;
+            changed = true;
+        }
+    });
+    if (changed) setData('holdings', holdings);
+}
+
+// 给所有持仓补全 symbol/market（不再从交易记录同步买入日期，避免交易记录日期错误污染持仓）
 function syncHoldingBuyDates() {
     const holdings = getData('holdings', []);
     let changed = false;
     holdings.forEach(h => {
-        const buyDate = getHoldingBuyDate(h.id) || (h.createdAt ? formatLocalDate(new Date(h.createdAt)) : null);
-        if (buyDate && h.buyDate !== buyDate) {
-            h.buyDate = buyDate;
-            changed = true;
-        }
         // 补全/修正 symbol 和 market（基金代码自动补零）
         const norm = normalizeStockCode(h.code, h.type);
         if (!h.symbol || h.symbol !== norm.symbol || !h.market || h.market !== norm.market) {
@@ -1198,19 +1208,7 @@ function initStocks() {
         });
         setData('records', records);
 
-        // 同步持仓的最早买入日期（不修改份额和成本，以持仓页面填写的为准）
-        const holdings = getData('holdings', []);
-        const h = holdings.find(h => h.id === holdingId);
-        if (h && type === 'buy') {
-            const buys = records.filter(r => r.holdingId === holdingId && r.type === 'buy');
-            buys.sort((a, b) => new Date(a.date) - new Date(b.date));
-            if (buys.length > 0) h.buyDate = buys[0].date;
-            setData('holdings', holdings);
-        }
-
         renderRecords();
-        $('#recordShares').value = '';
-        $('#recordPrice').value = '';
         showToast('交易已记录');
     });
 
@@ -1445,6 +1443,7 @@ async function refreshAllHoldingsQuotes() {
 }
 
 function renderProfitCalendar() {
+    fixInvalidBuyDates();
     let holdings = syncHoldingBuyDates();
     const period = APP.profitPeriod;
     const d = APP.profitDate;
@@ -1515,15 +1514,9 @@ function getDailyProfit(holding, year, month, day) {
     const dow = date.getDay();
     const dateStr = formatDateStr(date);
 
-    // 买入日期判断
-    let buyDayStart = null;
+    // 买入日期判断（用字符串比较，避免时区问题）
     const buyDateStr = holding.buyDate || (holding.createdAt ? formatLocalDate(new Date(holding.createdAt)) : null);
-    if (buyDateStr) {
-        const buyDate = new Date(buyDateStr + 'T00:00:00');
-        buyDayStart = new Date(buyDate.getFullYear(), buyDate.getMonth(), buyDate.getDate());
-        const thisDayStart = new Date(year, month, day);
-        if (thisDayStart < buyDayStart) return { value: 0, status: 'before' };
-    }
+    if (buyDateStr && dateStr < buyDateStr) return { value: 0, status: 'before' };
 
     // 周末休市
     if (dow === 0 || dow === 6) return { value: 0, status: 'weekend' };
@@ -1534,8 +1527,7 @@ function getDailyProfit(holding, year, month, day) {
     if (price === null) return { value: 0, status: 'nodata' };
 
     // 判断是否是买入当天
-    const thisDayStart = new Date(year, month, day);
-    const isBuyDay = buyDayStart && thisDayStart.getTime() === buyDayStart.getTime();
+    const isBuyDay = buyDateStr && dateStr === buyDateStr;
 
     let prevPrice = null;
     if (isBuyDay) {
@@ -1700,12 +1692,9 @@ function renderProfitDetail(period, year, month, day, holdings, titleEl, totalEl
         title = `${year}年${month + 1}月${day}日 收益明细` + (isWeekend ? '（休市）' : '');
         holdings.forEach(h => {
             const r = getDailyProfit(h, year, month, day);
-            const buyDate = h.createdAt ? new Date(h.createdAt) : null;
-            const buyDayStart = buyDate ? new Date(buyDate.getFullYear(), buyDate.getMonth(), buyDate.getDate()) : null;
-            const thisDayStart = new Date(year, month, day);
             let note = '';
             if (isWeekend) note = '休市';
-            else if (buyDayStart && thisDayStart < buyDayStart) note = '未持仓';
+            else if (r.status === 'before') note = '未持仓';
             else if (r.status === 'nodata') note = '无行情';
             total += r.value;
             details.push({ name: h.name, code: h.code, type: h.type, profit: r.value, note });
@@ -1833,9 +1822,12 @@ function fillRecordFromHolding() {
     if (h) {
         $('#recordShares').value = h.shares;
         $('#recordPrice').value = h.cost.toFixed(4);
+        // 日期默认用持仓买入日，没有则用今天
+        $('#recordDate').value = h.buyDate || formatLocalDate(new Date(h.createdAt || Date.now()));
     } else {
         $('#recordShares').value = '';
         $('#recordPrice').value = '';
+        $('#recordDate').value = formatLocalDate(new Date());
     }
 }
 
