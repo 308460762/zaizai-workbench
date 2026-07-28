@@ -1126,6 +1126,23 @@ button {
     margin-left: auto;
 }
 
+/* 现价只读字段（自动获取，系统每日更新） */
+.holding-price-readonly {
+    color: var(--primary);
+    font-weight: 600;
+}
+.holding-price-readonly::after {
+    content: '自动';
+    font-size: 9px;
+    margin-left: 4px;
+    padding: 1px 4px;
+    border-radius: 6px;
+    background: rgba(79, 195, 247, 0.18);
+    color: #29B6F6;
+    font-weight: 400;
+    vertical-align: middle;
+}
+
 /* 持仓批次明细 */
 .holding-batches {
     margin-top: 8px;
