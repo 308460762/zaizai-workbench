@@ -1046,7 +1046,7 @@ function initStocks() {
         if (!cost || cost <= 0) return showToast('请输入有效的成本价');
 
         const norm = normalizeStockCode(code, type);
-        let fetchedName = name;
+        // 如果用户没填当前价，尝试自动获取行情作为默认值，但绝不覆盖用户输入
         if (!price || price <= 0) {
             showToast('正在获取当前行情...');
             try {
@@ -1054,7 +1054,6 @@ function initStocks() {
                 const q = quotes[norm.symbol];
                 if (q && q.price > 0) {
                     price = q.price;
-                    fetchedName = q.name || name;
                 }
             } catch (e) {}
         }
@@ -1063,7 +1062,7 @@ function initStocks() {
         const holdings = getData('holdings', []);
         const newHolding = {
             id: Date.now(),
-            type, code, name: fetchedName, shares, cost, price,
+            type, code, name, shares, cost, price,
             symbol: norm.symbol,
             market: norm.market,
             createdAt: Date.now()
@@ -1076,7 +1075,7 @@ function initStocks() {
         renderHoldings();
         $('#addHoldingForm').style.display = 'none';
         clearHoldingForm();
-        showToast('持仓已添加，正在拉取行情');
+        showToast('持仓已添加');
     });
 
     // 收益明细 - 周期切换
@@ -1226,26 +1225,31 @@ function renderHoldings() {
         const profitPct = h.cost > 0 ? ((h.price - h.cost) / h.cost * 100) : 0;
         const isUp = profit >= 0;
         const typeLabel = h.type === 'fund' ? '基金' : '股票';
+        const buyDateStr = h.buyDate || formatLocalDate(new Date(h.createdAt));
         return `
             <div class="holding-item">
                 <div class="holding-main">
                     <div class="holding-header">
-                        <span class="holding-name">${escapeHtml(h.name)}</span>
+                        <span class="holding-name" contenteditable="true" data-id="${h.id}" data-field="name">${escapeHtml(h.name)}</span>
                         <span class="holding-type ${h.type}">${typeLabel}</span>
                     </div>
-                    <div class="holding-code">${escapeHtml(h.code)}</div>
+                    <div class="holding-code" contenteditable="true" data-id="${h.id}" data-field="code">${escapeHtml(h.code)}</div>
                     <div class="holding-stats">
                         <div class="stat-item">
                             <span class="stat-label">持仓</span>
-                            <span class="stat-value">${h.shares}</span>
+                            <span class="stat-value holding-editable" contenteditable="true" data-id="${h.id}" data-field="shares">${h.shares}</span>
                         </div>
                         <div class="stat-item">
                             <span class="stat-label">成本</span>
-                            <span class="stat-value">${h.cost.toFixed(4)}</span>
+                            <span class="stat-value holding-editable" contenteditable="true" data-id="${h.id}" data-field="cost">${h.cost.toFixed(4)}</span>
                         </div>
                         <div class="stat-item">
                             <span class="stat-label">现价</span>
-                            <span class="stat-value current-price" data-id="${h.id}" contenteditable="true">${h.price.toFixed(4)}</span>
+                            <span class="stat-value current-price holding-editable" data-id="${h.id}" data-field="price" contenteditable="true">${h.price.toFixed(4)}</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">买入日</span>
+                            <input type="date" class="holding-date-input" data-id="${h.id}" value="${buyDateStr}">
                         </div>
                         <div class="stat-item">
                             <span class="stat-label">市值</span>
@@ -1266,29 +1270,55 @@ function renderHoldings() {
         `;
     }).join('');
 
-    // 编辑当前价
-    list.querySelectorAll('.current-price').forEach(el => {
+    // 统一处理可编辑字段
+    const editableFields = ['name', 'code', 'shares', 'cost', 'price'];
+    list.querySelectorAll('.holding-editable, .holding-name, .holding-code').forEach(el => {
+        const field = el.dataset.field;
+        if (!editableFields.includes(field)) return;
+        el.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); el.blur(); }
+        });
         el.addEventListener('blur', () => {
             const id = parseInt(el.dataset.id);
-            const newPrice = parseFloat(el.textContent.trim());
-            if (!newPrice || newPrice <= 0) {
-                showToast('请输入有效价格');
-                renderHoldings();
-                return;
-            }
             const holdings = getData('holdings', []);
-            const h = holdings.find(h => h.id === id);
+            const h = holdings.find(x => x.id === id);
+            if (!h) return;
+            const raw = el.textContent.trim();
+            if (field === 'name') {
+                if (!raw) return renderHoldings();
+                h.name = raw;
+            } else if (field === 'code') {
+                if (!raw) return renderHoldings();
+                h.code = raw;
+                const norm = normalizeStockCode(raw, h.type);
+                h.symbol = norm.symbol;
+                h.market = norm.market;
+            } else if (field === 'shares') {
+                const v = parseFloat(raw);
+                if (!v || v <= 0) { showToast('请输入有效数量'); return renderHoldings(); }
+                h.shares = v;
+            } else if (field === 'cost' || field === 'price') {
+                const v = parseFloat(raw);
+                if (!v || v <= 0) { showToast('请输入有效价格'); return renderHoldings(); }
+                h[field] = v;
+            }
+            setData('holdings', holdings);
+            renderHoldings();
+            showToast('已更新');
+        });
+    });
+
+    // 买入日期选择
+    list.querySelectorAll('.holding-date-input').forEach(inp => {
+        inp.addEventListener('change', () => {
+            const id = parseInt(inp.dataset.id);
+            const holdings = getData('holdings', []);
+            const h = holdings.find(x => x.id === id);
             if (h) {
-                h.price = newPrice;
+                h.buyDate = inp.value;
                 setData('holdings', holdings);
                 renderHoldings();
-                showToast('价格已更新');
-            }
-        });
-        el.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                el.blur();
+                showToast('买入日期已更新');
             }
         });
     });

@@ -1159,6 +1159,15 @@ button {
     font-size: 15px;
     font-weight: 700;
     color: var(--text);
+    outline: none;
+    padding: 2px 4px;
+    border-radius: 4px;
+}
+
+.holding-name:focus,
+.holding-code:focus,
+.holding-editable:focus {
+    background: var(--primary-light);
 }
 
 .holding-type {
@@ -1183,12 +1192,16 @@ button {
     font-size: 12px;
     color: var(--text-secondary);
     margin-bottom: 10px;
+    outline: none;
+    padding: 2px 4px;
+    border-radius: 4px;
 }
 
 .holding-stats {
     display: flex;
-    gap: 16px;
+    gap: 12px;
     flex-wrap: wrap;
+    align-items: center;
 }
 
 .stat-item {
@@ -1210,9 +1223,23 @@ button {
 
 .stat-value.current-price {
     color: var(--primary);
+}
+
+.holding-editable {
     border-bottom: 1px dashed var(--primary);
     cursor: text;
     outline: none;
+    padding: 2px 4px;
+    border-radius: 4px;
+}
+
+.holding-date-input {
+    width: 110px;
+    padding: 2px 4px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 12px;
+    font-family: inherit;
 }
 
 .holding-right {
