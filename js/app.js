@@ -1276,6 +1276,7 @@ function initStocks() {
 
     // 交易记录
     $('#recordHolding').addEventListener('change', fillRecordFromHolding);
+    $('#recordType').addEventListener('change', fillRecordFromHolding);
 
     $('#addRecordBtn').addEventListener('click', () => {
         const type = $('#recordType').value;
@@ -1966,10 +1967,23 @@ function fillRecordFromHolding() {
     const holdings = getData('holdings', []);
     const h = holdings.find(x => x.id === holdingId);
     if (h) {
-        $('#recordShares').value = h.shares;
-        $('#recordPrice').value = h.cost.toFixed(4);
-        // 日期默认用持仓买入日，没有则用今天
-        $('#recordDate').value = h.buyDate || formatLocalDate(new Date(h.createdAt || Date.now()));
+        const type = $('#recordType').value;
+        const batches = Array.isArray(h.batches) ? h.batches : [];
+        if (type === 'buy') {
+            // 买入：带出最新一批的份额和成本（最近一次加仓的快照）
+            const latestBatch = batches.length > 0 ? batches[batches.length - 1] : null;
+            $('#recordShares').value = latestBatch ? latestBatch.shares : h.shares;
+            $('#recordPrice').value = (latestBatch ? latestBatch.cost : h.cost).toFixed(4);
+        } else {
+            // 卖出：带出总份额和当前价
+            $('#recordShares').value = h.shares;
+            $('#recordPrice').value = h.price.toFixed(4);
+        }
+        // 日期默认用最新批次买入日，没有则用今天
+        const latestBuyDate = batches.length > 0 && batches[batches.length - 1].buyDate
+            ? batches[batches.length - 1].buyDate
+            : (h.buyDate || formatLocalDate(new Date(h.createdAt || Date.now())));
+        $('#recordDate').value = latestBuyDate;
     } else {
         $('#recordShares').value = '';
         $('#recordPrice').value = '';

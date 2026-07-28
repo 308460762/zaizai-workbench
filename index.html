@@ -10,7 +10,7 @@
     <title>崽崽工作台</title>
     <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png">
     <link rel="manifest" href="manifest.json">
-    <link rel="stylesheet" href="css/style.css?v=6">
+    <link rel="stylesheet" href="css/style.css?v=7">
 </head>
 <body>
     <!-- 侧边栏 -->
@@ -285,8 +285,8 @@
                             <option value="sell">卖出</option>
                         </select>
                         <select id="recordHolding"></select>
-                        <input type="number" id="recordShares" placeholder="数量" min="0" step="0.01">
-                        <input type="number" id="recordPrice" placeholder="价格" min="0" step="0.0001">
+                        <input type="number" id="recordShares" placeholder="数量" min="0" step="0.01" readonly>
+                        <input type="number" id="recordPrice" placeholder="价格" min="0" step="0.0001" readonly>
                         <input type="date" id="recordDate">
                         <button id="addRecordBtn">记录交易</button>
                     </div>
@@ -590,7 +590,7 @@
             navigator.serviceWorker.register('sw.js').catch(() => {});
         }
     </script>
-    <script src="js/app.js?v=6"></script>
+    <script src="js/app.js?v=7"></script>
 
     <!-- 数据备份与恢复弹窗 -->
     <div class="modal-overlay" id="backupModal" style="display:none;">

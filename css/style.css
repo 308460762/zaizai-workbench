@@ -1771,6 +1771,17 @@ button {
     background: var(--bg-card);
 }
 
+/* 只读字段（自动带出，不可编辑） */
+.record-form input[readonly] {
+    background: #f0f0f0;
+    color: var(--text-secondary);
+    cursor: not-allowed;
+    border-style: dashed;
+}
+.record-form input[readonly]:focus {
+    border-color: var(--border);
+}
+
 .record-form button {
     padding: 10px 20px;
     font-size: 14px;
