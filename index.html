@@ -10,7 +10,7 @@
     <title>崽崽工作台</title>
     <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png">
     <link rel="manifest" href="manifest.json">
-    <link rel="stylesheet" href="css/style.css?v=9">
+    <link rel="stylesheet" href="css/style.css?v=10">
 </head>
 <body>
     <!-- 侧边栏 -->
@@ -73,12 +73,8 @@
                     <h2>📋 每日计划</h2>
                     <span class="panel-date" id="dailyPlanDate"></span>
                 </div>
-                <!-- 面板内搜索 + 快捷跳转 -->
+                <!-- 快捷跳转 -->
                 <div class="panel-quick-bar">
-                    <div class="panel-search">
-                        <span>🔍</span>
-                        <input type="text" id="panelSearchInput" placeholder="搜索任务、日程、灵感...">
-                    </div>
                     <button class="quick-jump-btn" id="quickJumpSchedule" title="跳转到工作日程">📅 今日日程</button>
                 </div>
                 <div class="task-input-group">
@@ -590,7 +586,7 @@
             navigator.serviceWorker.register('sw.js').catch(() => {});
         }
     </script>
-    <script src="js/app.js?v=9"></script>
+    <script src="js/app.js?v=10"></script>
 
     <!-- 数据备份与恢复弹窗 -->
     <div class="modal-overlay" id="backupModal" style="display:none;">
