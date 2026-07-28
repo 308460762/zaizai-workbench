@@ -1573,26 +1573,77 @@ function renderProfitDetail(period, year, month, day, holdings, titleEl, totalEl
         return;
     }
 
-    details.sort((a, b) => Math.abs(b.profit) - Math.abs(a.profit));
+    // 分为股票和基金两组
+    const stockList = details.filter(d => d.type !== 'fund').sort((a, b) => Math.abs(b.profit) - Math.abs(a.profit));
+    const fundList = details.filter(d => d.type === 'fund').sort((a, b) => Math.abs(b.profit) - Math.abs(a.profit));
 
-    listEl.innerHTML = details.map(d => {
-        const isUp = d.profit >= 0;
-        const typeLabel = d.type === 'fund' ? '基金' : '股票';
-        const noteHtml = d.note ? `<span class="profit-detail-note">${d.note}</span>` : '';
-        const showDash = d.note && d.note !== '';
-        const valHtml = showDash
-            ? `<span class="profit-detail-val" style="color:#999;">—</span>`
-            : `<span class="profit-detail-val ${isUp ? 'profit-up' : 'profit-down'}">${isUp ? '+' : ''}¥${d.profit.toFixed(2)}</span>`;
-        return `
-            <div class="profit-detail-item">
-                <div class="profit-detail-info">
-                    <span class="profit-detail-name">${escapeHtml(d.name)}</span>
-                    <span class="profit-detail-code">${escapeHtml(d.code)} · ${typeLabel}${noteHtml ? ' ' + noteHtml : ''}</span>
+    const renderGroup = (title, group) => {
+        if (group.length === 0) return '';
+        const groupTotal = group.reduce((s, d) => s + (d.note ? 0 : d.profit), 0);
+        const items = group.map(d => {
+            const isUp = d.profit >= 0;
+            const noteHtml = d.note ? `<span class="profit-detail-note">${d.note}</span>` : '';
+            const showDash = !!d.note;
+            const valHtml = showDash
+                ? `<span class="profit-detail-val" style="color:#999;">—</span>`
+                : `<span class="profit-detail-val ${isUp ? 'profit-up' : 'profit-down'}">${isUp ? '+' : ''}¥${d.profit.toFixed(2)}</span>`;
+            return `
+                <div class="profit-detail-item">
+                    <div class="profit-detail-info">
+                        <span class="profit-detail-name">${escapeHtml(d.name)}</span>
+                        <span class="profit-detail-code">${escapeHtml(d.code)} · 股票${noteHtml ? ' ' + noteHtml : ''}</span>
+                    </div>
+                    ${valHtml}
                 </div>
-                ${valHtml}
+            `;
+        }).join('');
+        const totalClass = groupTotal >= 0 ? 'profit-up' : 'profit-down';
+        const totalStr = (groupTotal >= 0 ? '+' : '') + '¥' + groupTotal.toFixed(2);
+        return `
+            <div class="profit-group">
+                <div class="profit-group-header">
+                    <span class="profit-group-title">${title}</span>
+                    <span class="profit-group-total ${totalClass}">${totalStr}</span>
+                </div>
+                <div class="profit-group-list">${items}</div>
             </div>
         `;
-    }).join('');
+    };
+
+    const renderFundGroup = (title, group) => {
+        if (group.length === 0) return '';
+        const groupTotal = group.reduce((s, d) => s + (d.note ? 0 : d.profit), 0);
+        const items = group.map(d => {
+            const isUp = d.profit >= 0;
+            const noteHtml = d.note ? `<span class="profit-detail-note">${d.note}</span>` : '';
+            const showDash = !!d.note;
+            const valHtml = showDash
+                ? `<span class="profit-detail-val" style="color:#999;">—</span>`
+                : `<span class="profit-detail-val ${isUp ? 'profit-up' : 'profit-down'}">${isUp ? '+' : ''}¥${d.profit.toFixed(2)}</span>`;
+            return `
+                <div class="profit-detail-item">
+                    <div class="profit-detail-info">
+                        <span class="profit-detail-name">${escapeHtml(d.name)}</span>
+                        <span class="profit-detail-code">${escapeHtml(d.code)} · 基金${noteHtml ? ' ' + noteHtml : ''}</span>
+                    </div>
+                    ${valHtml}
+                </div>
+            `;
+        }).join('');
+        const totalClass = groupTotal >= 0 ? 'profit-up' : 'profit-down';
+        const totalStr = (groupTotal >= 0 ? '+' : '') + '¥' + groupTotal.toFixed(2);
+        return `
+            <div class="profit-group">
+                <div class="profit-group-header">
+                    <span class="profit-group-title">${title}</span>
+                    <span class="profit-group-total ${totalClass}">${totalStr}</span>
+                </div>
+                <div class="profit-group-list">${items}</div>
+            </div>
+        `;
+    };
+
+    listEl.innerHTML = renderGroup('📈 股票', stockList) + renderFundGroup('💰 基金', fundList);
 }
 
 // ---- 交易记录 ----
@@ -2199,15 +2250,43 @@ function renderReviews(reviews) {
 }
 
 // ========== 工作日程 ==========
+let currentEditingDate = null;
+
 function initSchedule() {
-    $('#scheduleDate').value = formatLocalDate(new Date());
+    // 颜色选择（弹窗内）
+    document.addEventListener('click', (e) => {
+        const dot = e.target.closest('.schedule-edit-add .color-dot');
+        if (!dot) return;
+        dot.parentElement.querySelectorAll('.color-dot').forEach(d => d.classList.remove('active'));
+        dot.classList.add('active');
+    });
 
     // 日程编辑弹窗事件
     $('#closeScheduleEditModal').addEventListener('click', closeScheduleEdit);
-    $('#saveScheduleEditBtn').addEventListener('click', saveScheduleEdit);
-    $('#deleteScheduleBtn').addEventListener('click', deleteSchedule);
     $('#scheduleEditModal').addEventListener('click', (e) => {
         if (e.target === $('#scheduleEditModal')) closeScheduleEdit();
+    });
+
+    // 新增日程
+    $('#addNewScheduleBtn').addEventListener('click', () => {
+        const text = $('#newScheduleText').value.trim();
+        if (!text || !currentEditingDate) return showToast('请输入日程内容');
+        const time = $('#newScheduleTime').value;
+        const color = $('#scheduleEditModal .color-dot.active')?.dataset.color || '#333';
+        const schedules = getData('schedules', []);
+        schedules.push({
+            id: Date.now() + Math.floor(Math.random() * 1000),
+            text, date: currentEditingDate, time, color, done: false
+        });
+        setData('schedules', schedules);
+        $('#newScheduleText').value = '';
+        $('#newScheduleTime').value = '';
+        renderScheduleEditList();
+        renderSchedule();
+        showToast('日程已添加');
+    });
+    $('#newScheduleText').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') $('#addNewScheduleBtn').click();
     });
 
     $$('.view-tab').forEach(tab => {
@@ -2233,30 +2312,6 @@ function initSchedule() {
         else APP.scheduleDate.setFullYear(APP.scheduleDate.getFullYear() + 1);
         APP.scheduleDate = new Date(APP.scheduleDate);
         renderSchedule();
-    });
-
-    $('#addScheduleBtn').addEventListener('click', () => {
-        const text = $('#scheduleInput').value.trim();
-        const date = $('#scheduleDate').value;
-        const time = $('#scheduleTime').value;
-        const color = document.querySelector('.color-dot.active')?.dataset.color || '#333';
-        if (!text || !date) return showToast('请输入日程内容和日期');
-
-        const schedules = getData('schedules', []);
-        schedules.push({ id: Date.now(), text, date, time, color, done: false });
-        setData('schedules', schedules);
-        $('#scheduleInput').value = '';
-        $('#scheduleTime').value = '';
-        renderSchedule();
-        showToast('日程已添加');
-    });
-
-    // 颜色选择
-    document.querySelectorAll('.color-dot').forEach(dot => {
-        dot.addEventListener('click', () => {
-            document.querySelectorAll('.color-dot').forEach(d => d.classList.remove('active'));
-            dot.classList.add('active');
-        });
     });
 
     // 保存本月总结
@@ -2367,58 +2422,155 @@ function renderMonthView(d) {
     html += '</div>';
     $('#scheduleContent').innerHTML = html;
 
-    // 月视图点击事件
+    // 月视图点击事件：点击日程项进入该日期弹窗，点击空白日期单元格进入该日期弹窗
     $$('.month-task').forEach(task => {
         task.addEventListener('click', (e) => {
             e.stopPropagation();
             openScheduleEdit(parseInt(task.dataset.id));
         });
     });
+    $$('.month-day:not(.empty)').forEach(day => {
+        day.addEventListener('click', () => {
+            openScheduleEdit(day.dataset.date);
+        });
+    });
 }
 
-function openScheduleEdit(id) {
+function openScheduleEdit(dateOrId) {
     const schedules = getData('schedules', []);
-    const s = schedules.find(s => s.id === id);
-    if (!s) return;
-
-    $('#editScheduleId').value = id;
-    $('#editScheduleText').value = s.text;
-    $('#editScheduleDate').value = s.date;
-    $('#editScheduleTime').value = s.time || '';
+    // 兼容旧的 id 调用
+    let date;
+    if (typeof dateOrId === 'number') {
+        const s = schedules.find(x => x.id === dateOrId);
+        if (!s) return;
+        date = s.date;
+    } else {
+        date = dateOrId;
+    }
+    currentEditingDate = date;
+    const d = new Date(date + 'T00:00:00');
+    $('#scheduleEditDateTitle').textContent = `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日`;
+    renderScheduleEditList();
     $('#scheduleEditModal').style.display = 'flex';
+}
+
+function renderScheduleEditList() {
+    if (!currentEditingDate) return;
+    const schedules = getData('schedules', []);
+    const list = schedules.filter(s => s.date === currentEditingDate)
+        .sort((a, b) => (a.time || '') > (b.time || '') ? 1 : -1);
+    const container = $('#scheduleEditList');
+    if (list.length === 0) {
+        container.innerHTML = '<div class="schedule-empty">该日期还没有日程，在下方添加吧～</div>';
+        return;
+    }
+    container.innerHTML = list.map(s => `
+        <div class="schedule-edit-item${s.done ? ' done' : ''}" data-id="${s.id}">
+            <div class="schedule-edit-check${s.done ? ' checked' : ''}" data-id="${s.id}">${s.done ? '✓' : ''}</div>
+            <div class="schedule-edit-body">
+                <span class="schedule-edit-text" contenteditable="true" data-id="${s.id}">${escapeHtml(s.text)}</span>
+                ${s.time ? `<span class="schedule-edit-time">⏰ ${s.time}</span>` : '<span class="schedule-edit-time">⏰ --</span>'}
+                <button class="schedule-edit-time-btn" data-id="${s.id}">改时间</button>
+                <input type="time" class="schedule-edit-time-input" data-id="${s.id}" style="display:none;">
+                <div class="schedule-edit-colors">
+                    ${['#333','#FF6B8A','#7E57C2','#42A5F5','#66BB6A','#FFA726'].map(c => `<span class="color-dot-mini${c===(s.color||'#333')?' active':''}" data-id="${s.id}" data-color="${c}" style="background:${c};"></span>`).join('')}
+                </div>
+            </div>
+            <button class="schedule-edit-delete" data-id="${s.id}">🗑️</button>
+        </div>
+    `).join('');
+
+    // 完成切换
+    container.querySelectorAll('.schedule-edit-check').forEach(el => {
+        el.addEventListener('click', () => {
+            const id = parseInt(el.dataset.id);
+            const all = getData('schedules', []);
+            const s = all.find(x => x.id === id);
+            if (!s) return;
+            s.done = !s.done;
+            setData('schedules', all);
+            renderScheduleEditList();
+            renderSchedule();
+        });
+    });
+
+    // 行内编辑文本
+    container.querySelectorAll('.schedule-edit-text').forEach(el => {
+        el.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); el.blur(); }
+        });
+        el.addEventListener('blur', () => {
+            const id = parseInt(el.dataset.id);
+            const newText = el.textContent.trim();
+            if (!newText) { renderScheduleEditList(); return; }
+            const all = getData('schedules', []);
+            const s = all.find(x => x.id === id);
+            if (s && s.text !== newText) {
+                s.text = newText;
+                setData('schedules', all);
+                renderSchedule();
+            }
+        });
+    });
+
+    // 改时间按钮
+    container.querySelectorAll('.schedule-edit-time-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const id = parseInt(btn.dataset.id);
+            const input = container.querySelector(`.schedule-edit-time-input[data-id="${id}"]`);
+            input.style.display = input.style.display === 'none' ? 'inline-block' : 'none';
+            const all = getData('schedules', []);
+            const s = all.find(x => x.id === id);
+            if (s && s.time) input.value = s.time;
+            input.focus();
+        });
+    });
+    container.querySelectorAll('.schedule-edit-time-input').forEach(inp => {
+        inp.addEventListener('change', () => {
+            const id = parseInt(inp.dataset.id);
+            const all = getData('schedules', []);
+            const s = all.find(x => x.id === id);
+            if (s) {
+                s.time = inp.value;
+                setData('schedules', all);
+                renderScheduleEditList();
+                renderSchedule();
+            }
+        });
+    });
+
+    // 颜色选择
+    container.querySelectorAll('.color-dot-mini').forEach(dot => {
+        dot.addEventListener('click', () => {
+            const id = parseInt(dot.dataset.id);
+            const c = dot.dataset.color;
+            const all = getData('schedules', []);
+            const s = all.find(x => x.id === id);
+            if (s) {
+                s.color = c;
+                setData('schedules', all);
+                renderScheduleEditList();
+                renderSchedule();
+            }
+        });
+    });
+
+    // 删除
+    container.querySelectorAll('.schedule-edit-delete').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const id = parseInt(btn.dataset.id);
+            const all = getData('schedules', []);
+            setData('schedules', all.filter(x => x.id !== id));
+            renderScheduleEditList();
+            renderSchedule();
+            showToast('日程已删除');
+        });
+    });
 }
 
 function closeScheduleEdit() {
     $('#scheduleEditModal').style.display = 'none';
-}
-
-function saveScheduleEdit() {
-    const id = parseInt($('#editScheduleId').value);
-    const text = $('#editScheduleText').value.trim();
-    const date = $('#editScheduleDate').value;
-    const time = $('#editScheduleTime').value;
-    if (!text || !date) return showToast('请输入日程内容和日期');
-
-    const schedules = getData('schedules', []);
-    const s = schedules.find(s => s.id === id);
-    if (s) {
-        s.text = text;
-        s.date = date;
-        s.time = time;
-        setData('schedules', schedules);
-        closeScheduleEdit();
-        renderSchedule();
-        showToast('日程已更新');
-    }
-}
-
-function deleteSchedule() {
-    const id = parseInt($('#editScheduleId').value);
-    const schedules = getData('schedules', []);
-    setData('schedules', schedules.filter(s => s.id !== id));
-    closeScheduleEdit();
-    renderSchedule();
-    showToast('日程已删除');
+    currentEditingDate = null;
 }
 
 function renderYearView(d) {

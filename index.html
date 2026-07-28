@@ -433,21 +433,7 @@
                     <span id="scheduleTitle"></span>
                     <button id="scheduleNext">▶</button>
                 </div>
-                <div class="schedule-add-row">
-                    <input type="text" id="scheduleInput" placeholder="添加日程..." maxlength="100">
-                    <input type="date" id="scheduleDate">
-                    <input type="time" id="scheduleTime">
-                    <div class="schedule-color-picker">
-                        <span>标记颜色：</span>
-                        <button class="color-dot active" data-color="#333" style="background:#333;"></button>
-                        <button class="color-dot" data-color="#FF6B8A" style="background:#FF6B8A;"></button>
-                        <button class="color-dot" data-color="#7E57C2" style="background:#7E57C2;"></button>
-                        <button class="color-dot" data-color="#42A5F5" style="background:#42A5F5;"></button>
-                        <button class="color-dot" data-color="#66BB6A" style="background:#66BB6A;"></button>
-                        <button class="color-dot" data-color="#FFA726" style="background:#FFA726;"></button>
-                    </div>
-                    <button id="addScheduleBtn">➕ 添加</button>
-                </div>
+                <div class="schedule-hint">👆 点击日期框添加/查看日程，点击日程项可编辑删除</div>
                 <div id="scheduleContent"></div>
 
                 <!-- 本月总结 -->
@@ -558,20 +544,24 @@
 
     <!-- 日程编辑弹窗 -->
     <div class="modal-overlay" id="scheduleEditModal" style="display:none;">
-        <div class="modal-content">
+        <div class="modal-content modal-large">
             <div class="modal-header">
-                <h3>✏️ 编辑日程</h3>
+                <h3>📅 <span id="scheduleEditDateTitle"></span></h3>
                 <button class="modal-close" id="closeScheduleEditModal">✕</button>
             </div>
-            <input type="hidden" id="editScheduleId">
-            <div class="edit-form">
-                <input type="text" id="editScheduleText" placeholder="日程内容" maxlength="100">
-                <input type="date" id="editScheduleDate">
-                <input type="time" id="editScheduleTime">
-                <div class="edit-actions">
-                    <button id="saveScheduleEditBtn">保存</button>
-                    <button id="deleteScheduleBtn" class="btn-danger">删除</button>
+            <div class="schedule-edit-list" id="scheduleEditList"></div>
+            <div class="schedule-edit-add">
+                <input type="text" id="newScheduleText" placeholder="添加新日程..." maxlength="100">
+                <input type="time" id="newScheduleTime" placeholder="时间">
+                <div class="schedule-color-picker">
+                    <button class="color-dot active" data-color="#333" style="background:#333;"></button>
+                    <button class="color-dot" data-color="#FF6B8A" style="background:#FF6B8A;"></button>
+                    <button class="color-dot" data-color="#7E57C2" style="background:#7E57C2;"></button>
+                    <button class="color-dot" data-color="#42A5F5" style="background:#42A5F5;"></button>
+                    <button class="color-dot" data-color="#66BB6A" style="background:#66BB6A;"></button>
+                    <button class="color-dot" data-color="#FFA726" style="background:#FFA726;"></button>
                 </div>
+                <button id="addNewScheduleBtn">➕ 添加到该日</button>
             </div>
         </div>
     </div>

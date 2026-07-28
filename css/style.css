@@ -1602,6 +1602,36 @@ button {
     font-weight: 700;
 }
 
+.profit-group {
+    margin-top: 12px;
+}
+
+.profit-group-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 4px;
+    margin-bottom: 8px;
+    border-bottom: 2px solid var(--border);
+}
+
+.profit-group-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text);
+}
+
+.profit-group-total {
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.profit-group-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
 /* 交易记录表单 */
 .record-form {
     display: flex;
@@ -2887,12 +2917,17 @@ button {
 
 .month-day:hover {
     box-shadow: var(--shadow-hover);
+    background: var(--primary-light);
 }
 
 .month-day.empty {
     background: transparent;
     box-shadow: none;
     cursor: default;
+}
+
+.month-day.empty:hover {
+    background: transparent;
 }
 
 .month-day.today {
@@ -3448,6 +3483,10 @@ button {
     box-shadow: 0 10px 40px rgba(0,0,0,0.2);
 }
 
+.modal-content.modal-large {
+    max-width: 480px;
+}
+
 .edit-form {
     display: flex;
     flex-direction: column;
@@ -3475,6 +3514,181 @@ button {
 
 .edit-actions button {
     flex: 1;
+}
+
+.schedule-hint {
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin: 8px 0;
+    padding: 8px 12px;
+    background: var(--primary-light);
+    border-radius: 8px;
+}
+
+.schedule-edit-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 50vh;
+    overflow-y: auto;
+    margin-bottom: 16px;
+}
+
+.schedule-empty {
+    text-align: center;
+    padding: 24px;
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+.schedule-edit-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px;
+    background: var(--bg-card);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow);
+    border-left: 4px solid var(--border);
+}
+
+.schedule-edit-item.done {
+    opacity: 0.6;
+}
+
+.schedule-edit-item.done .schedule-edit-text {
+    text-decoration: line-through;
+    color: #999;
+}
+
+.schedule-edit-check {
+    width: 22px;
+    height: 22px;
+    border: 2px solid #ddd;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: 13px;
+    color: white;
+}
+
+.schedule-edit-check.checked {
+    background: var(--success);
+    border-color: var(--success);
+}
+
+.schedule-edit-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+}
+
+.schedule-edit-text {
+    font-size: 14px;
+    outline: none;
+    padding: 2px 4px;
+    border-radius: 4px;
+    word-break: break-word;
+    min-width: 0;
+}
+
+.schedule-edit-text:focus {
+    background: var(--primary-light);
+}
+
+.schedule-edit-time {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.schedule-edit-time-btn {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    width: fit-content;
+}
+
+.schedule-edit-time-input {
+    width: fit-content;
+    padding: 2px 4px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 12px;
+}
+
+.schedule-edit-colors {
+    display: flex;
+    gap: 4px;
+}
+
+.color-dot-mini {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid transparent;
+    opacity: 0.4;
+}
+
+.color-dot-mini.active {
+    opacity: 1;
+    border-color: var(--text);
+}
+
+.schedule-edit-delete {
+    background: none;
+    border: none;
+    color: #ddd;
+    cursor: pointer;
+    font-size: 16px;
+    flex-shrink: 0;
+}
+
+.schedule-edit-delete:hover {
+    color: var(--danger);
+}
+
+.schedule-edit-add {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    background: var(--primary-light);
+    border-radius: var(--radius-sm);
+}
+
+.schedule-edit-add input {
+    padding: 8px 10px;
+    border: 2px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    outline: none;
+    font-family: inherit;
+}
+
+.schedule-edit-add input:focus {
+    border-color: var(--primary);
+}
+
+.schedule-edit-add #addNewScheduleBtn {
+    background: var(--primary);
+    color: white;
+    border: none;
+    padding: 10px;
+    border-radius: var(--radius-sm);
+    font-size: 14px;
+    cursor: pointer;
+    font-family: inherit;
 }
 
 .btn-danger {
