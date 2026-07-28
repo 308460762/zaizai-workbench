@@ -158,6 +158,13 @@ function formatDateStr(d) {
     return `${year}-${month}-${day}`;
 }
 
+function formatDateCompact(d) {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}${month}${day}`;
+}
+
 function getQuoteCache(symbol) {
     return getData('quote_' + symbol, null);
 }
@@ -258,10 +265,14 @@ async function updateHoldingQuotes(holding) {
     holding.market = norm.market;
 
     const today = new Date();
-    const startDate = new Date(holding.createdAt);
+    // 用最早买入日期作为行情起点，确保覆盖完整持仓周期
+    const buyDateStr = holding.buyDate || getHoldingBuyDate(holding.id) || formatLocalDate(new Date(holding.createdAt));
+    const startDate = new Date(buyDateStr + 'T00:00:00');
     startDate.setDate(startDate.getDate() - 5); // 多取前几天用于计算
     const start = formatDateStr(startDate);
-    const end = formatDateStr(today);
+    // end 不能超过今天，避免未来日期导致接口报错
+    const todayStr = formatDateStr(today);
+    const end = todayStr;
 
     let cache = getQuoteCache(norm.symbol) || { list: [], updatedAt: 0 };
 
@@ -1310,6 +1321,7 @@ function navigateProfit(dir) {
 
 // 刷新所有持仓行情
 async function refreshAllHoldingsQuotes() {
+    syncHoldingBuyDates();
     const holdings = getData('holdings', []);
     if (holdings.length === 0) return;
     const status = $('#quoteStatus');
@@ -1340,8 +1352,7 @@ async function refreshAllHoldingsQuotes() {
 }
 
 function renderProfitCalendar() {
-    syncHoldingBuyDates();
-    let holdings = getData('holdings', []);
+    let holdings = syncHoldingBuyDates();
     const period = APP.profitPeriod;
     const d = APP.profitDate;
     const titleEl = $('#profitTitle');
@@ -1514,8 +1525,8 @@ function renderDayCalendar(year, month, holdings, calendarEl) {
             APP.profitSelectedDate = new Date(y, m, day);
             calendarEl.querySelectorAll('.profit-day').forEach(d => d.classList.remove('selected'));
             el.classList.add('selected');
-            // 按当前类型过滤持仓
-            let holdings = getData('holdings', []);
+            // 先同步买入日期，再按当前类型过滤持仓
+            let holdings = syncHoldingBuyDates();
             if (APP.profitType === 'stock') holdings = holdings.filter(h => h.type !== 'fund');
             if (APP.profitType === 'fund') holdings = holdings.filter(h => h.type === 'fund');
             renderProfitDetail('day', y, m, day, holdings, $('#profitDetailTitle'), $('#profitDetailTotal'), $('#profitDetailList'));
