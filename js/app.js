@@ -559,7 +559,6 @@ function switchPanel(panelId) {
     if (navItem) navItem.classList.add('active');
 
     // 清除搜索
-    $('#panelSearchInput').value = '';
     $('#globalSearchInput').value = '';
     $('#searchResults').style.display = 'none';
 
@@ -740,26 +739,8 @@ function performSearch(query) {
     return results.slice(0, 15);
 }
 
-// ========== 面板内搜索 ==========
+// ========== 快捷跳转 ==========
 function initPanelSearch() {
-    const input = $('#panelSearchInput');
-    let debounceTimer;
-
-    input.addEventListener('input', () => {
-        clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(() => {
-            const query = input.value.trim().toLowerCase();
-            // 在当前每日计划面板中过滤任务
-            const tasks = getData('tasks', []);
-            if (query.length >= 1) {
-                const filtered = tasks.filter(t => t.text.toLowerCase().includes(query));
-                renderTasks(filtered);
-            } else {
-                renderTasks(tasks);
-            }
-        }, 200);
-    });
-
     // 快捷跳转到今日日程（月视图）
     $('#quickJumpSchedule').addEventListener('click', () => {
         APP.scheduleView = 'month';
