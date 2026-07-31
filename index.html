@@ -10,7 +10,7 @@
     <title>崽崽工作台</title>
     <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png">
     <link rel="manifest" href="manifest.json">
-    <link rel="stylesheet" href="css/style.css?v=10">
+    <link rel="stylesheet" href="css/style.css?v=11">
 </head>
 <body>
     <!-- 侧边栏 -->
@@ -190,7 +190,38 @@
                     </div>
                     <div class="transaction-list" id="transactionList"></div>
                 </div>
+
+                <!-- 历史月历 -->
+                <div class="savings-block">
+                    <div class="block-title">📅 历史月历</div>
+                    <div class="calendar-nav">
+                        <button id="prevMonthBtn" class="calendar-nav-btn">‹</button>
+                        <span id="savingsCalendarTitle" class="calendar-nav-title"></span>
+                        <button id="nextMonthBtn" class="calendar-nav-btn">›</button>
+                    </div>
+                    <div class="sc-weekdays">
+                        <span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span>
+                    </div>
+                    <div id="savingsCalendar" class="sc-calendar-grid"></div>
+                    <div class="sc-legend">
+                        <span class="sc-legend-item"><i class="sc-dot sc-dot-expense"></i>支出</span>
+                        <span class="sc-legend-item"><i class="sc-dot sc-dot-income"></i>收入</span>
+                        <span class="sc-legend-item"><i class="sc-dot sc-dot-save"></i>已存</span>
+                    </div>
+                </div>
             </section>
+
+            <!-- 日收支明细弹窗 -->
+            <div class="modal-overlay" id="dayDetailModal" style="display:none;">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h3 id="dayDetailTitle"></h3>
+                        <button class="modal-close" id="closeDayDetailModal">✕</button>
+                    </div>
+                    <div id="dayDetailSummary" class="day-detail-summary"></div>
+                    <div class="transaction-list" id="dayDetailList"></div>
+                </div>
+            </div>
 
             <!-- 股票基金 -->
             <section class="panel" id="panel-stocks">
@@ -586,7 +617,7 @@
             navigator.serviceWorker.register('sw.js').catch(() => {});
         }
     </script>
-    <script src="js/app.js?v=10"></script>
+    <script src="js/app.js?v=11"></script>
 
     <!-- 数据备份与恢复弹窗 -->
     <div class="modal-overlay" id="backupModal" style="display:none;">
