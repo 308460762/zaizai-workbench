@@ -14,6 +14,7 @@ const APP = {
     englishSeconds: 0,
     englishTimer: null,
     emojiData: null,
+    savingsCalDate: new Date(),
 };
 
 // ========== 导航配置 ==========
@@ -903,6 +904,16 @@ function initSavings() {
             $('#transCategory').value = '餐饮';
         }
     });
+
+    // 历史月历：月份导航
+    $('#prevMonthBtn').addEventListener('click', () => navigateSavingsMonth(-1));
+    $('#nextMonthBtn').addEventListener('click', () => navigateSavingsMonth(1));
+
+    // 日详情弹窗关闭
+    $('#closeDayDetailModal').addEventListener('click', closeDayDetail);
+    $('#dayDetailModal').addEventListener('click', (e) => {
+        if (e.target === $('#dayDetailModal')) closeDayDetail();
+    });
 }
 
 const BASE_EXPENSE_CATEGORIES = ['餐饮', '交通', '购物', '娱乐', '居住', '其他'];
@@ -1004,6 +1015,8 @@ function updateSavingsDisplay() {
 
     // 交易列表
     renderTransactions(transactions.slice(0, 30));
+    // 历史月历
+    renderSavingsCalendar();
 }
 
 function renderTransactions(transactions) {
@@ -1021,6 +1034,130 @@ function renderTransactions(transactions) {
             <span class="amount ${t.type}">${t.type === 'expense' ? '-' : (t.type === 'save' ? '+' : '+')}¥${t.amount.toFixed(2)}</span>
         </div>
     `).join('');
+}
+
+// ========== 历史月历 ==========
+function renderSavingsCalendar() {
+    const container = $('#savingsCalendar');
+    const titleEl = $('#savingsCalendarTitle');
+    if (!container) return;
+    const d = APP.savingsCalDate;
+    const year = d.getFullYear();
+    const month = d.getMonth();
+    const today = new Date();
+    const todayStr = formatLocalDate(today);
+    const monthStartStr = `${year}-${String(month + 1).padStart(2, '0')}`;
+
+    titleEl.textContent = `${year}年${month + 1}月`;
+
+    // 按日期聚合所有交易
+    const transactions = getData('transactions', []);
+    const dayMap = {}; // dateStr -> { expense, income, save, list }
+    transactions.forEach(t => {
+        if (!t.date || !t.date.startsWith(monthStartStr)) return;
+        if (!dayMap[t.date]) dayMap[t.date] = { expense: 0, income: 0, save: 0, list: [] };
+        if (t.type === 'expense') dayMap[t.date].expense += t.amount;
+        else if (t.type === 'income') dayMap[t.date].income += t.amount;
+        else if (t.type === 'save') dayMap[t.date].save += t.amount;
+        dayMap[t.date].list.push(t);
+    });
+
+    const firstDay = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    let html = '';
+    for (let i = 0; i < firstDay; i++) html += '<div class="sc-day sc-day-empty"></div>';
+    for (let day = 1; day <= daysInMonth; day++) {
+        const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        const data = dayMap[dateStr];
+        const hasData = !!data;
+        const isToday = dateStr === todayStr;
+        const cellClass = 'sc-day' + (hasData ? ' sc-day-has-data' : '') + (isToday ? ' sc-day-today' : '');
+        let amountsHtml = '';
+        if (hasData) {
+            const fmt = v => (v >= 100 ? Math.round(v) : v.toFixed(1));
+            if (data.expense > 0) amountsHtml += `<div class="sc-amt sc-amt-expense">-${fmt(data.expense)}</div>`;
+            if (data.income > 0) amountsHtml += `<div class="sc-amt sc-amt-income">+${fmt(data.income)}</div>`;
+            if (data.save > 0) amountsHtml += `<div class="sc-amt sc-amt-save">+${fmt(data.save)}</div>`;
+            if (!amountsHtml) amountsHtml = '<div class="sc-amt-empty">—</div>';
+        } else {
+            amountsHtml = '<div class="sc-amt-empty">·</div>';
+        }
+        html += `<div class="${cellClass}" data-date="${dateStr}">
+            <div class="sc-day-num">${day}</div>
+            <div class="sc-day-amounts">${amountsHtml}</div>
+        </div>`;
+    }
+    container.innerHTML = html;
+
+    // 绑定点击事件
+    container.querySelectorAll('.sc-day').forEach(el => {
+        el.addEventListener('click', () => {
+            const dateStr = el.dataset.date;
+            if (dateStr) openDayDetail(dateStr);
+        });
+    });
+}
+
+function openDayDetail(dateStr) {
+    const transactions = getData('transactions', []);
+    const list = transactions.filter(t => t.date === dateStr);
+    // 标题：年-月-日 星期几
+    const d = new Date(dateStr + 'T00:00:00');
+    const week = ['日', '一', '二', '三', '四', '五', '六'][d.getDay()];
+    $('#dayDetailTitle').textContent = `${dateStr} 星期${week}`;
+
+    // 汇总
+    let totalExpense = 0, totalIncome = 0, totalSave = 0;
+    list.forEach(t => {
+        if (t.type === 'expense') totalExpense += t.amount;
+        else if (t.type === 'income') totalIncome += t.amount;
+        else if (t.type === 'save') totalSave += t.amount;
+    });
+    const summaryHtml = `
+        <div class="day-detail-summary-item expense">
+            <div class="label">支出</div>
+            <div class="value">¥${totalExpense.toFixed(2)}</div>
+        </div>
+        <div class="day-detail-summary-item income">
+            <div class="label">收入</div>
+            <div class="value">¥${totalIncome.toFixed(2)}</div>
+        </div>
+        <div class="day-detail-summary-item save">
+            <div class="label">已存</div>
+            <div class="value">¥${totalSave.toFixed(2)}</div>
+        </div>
+    `;
+    $('#dayDetailSummary').innerHTML = summaryHtml;
+
+    // 列表（按时间倒序）
+    const sorted = list.slice().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    const listEl = $('#dayDetailList');
+    if (sorted.length === 0) {
+        listEl.innerHTML = '<div style="text-align:center;padding:20px;color:#ccc;">当日无记录</div>';
+    } else {
+        listEl.innerHTML = sorted.map(t => `
+            <div class="trans-item">
+                <div>
+                    <div>${escapeHtml(t.note || '')}</div>
+                    <div class="trans-category">${escapeHtml(t.category || (t.type === 'income' ? '收入' : '支出'))}</div>
+                </div>
+                <span class="amount ${t.type}">${t.type === 'expense' ? '-' : '+'}¥${t.amount.toFixed(2)}</span>
+            </div>
+        `).join('');
+    }
+
+    $('#dayDetailModal').style.display = 'flex';
+}
+
+function closeDayDetail() {
+    const modal = $('#dayDetailModal');
+    if (modal) modal.style.display = 'none';
+}
+
+function navigateSavingsMonth(dir) {
+    const d = APP.savingsCalDate;
+    d.setMonth(d.getMonth() + dir);
+    renderSavingsCalendar();
 }
 
 // ========== 股票基金 ==========
