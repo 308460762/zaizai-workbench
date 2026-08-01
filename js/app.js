@@ -1013,8 +1013,10 @@ function updateSavingsDisplay() {
     $('#goalText').textContent = `本月已存 ¥${monthSaved.toFixed(0)} / 目标 ¥${monthlyGoal.toFixed(0)}`;
     $('#goalPercent').textContent = `${goalPct.toFixed(0)}%`;
 
-    // 交易列表
-    renderTransactions(transactions.slice(0, 30));
+    // 交易列表（只显示当天）
+    const todayStr = formatLocalDate(new Date());
+    const todayTransactions = transactions.filter(t => t.date === todayStr);
+    renderTransactions(todayTransactions);
     // 历史月历
     renderSavingsCalendar();
 }
@@ -1022,18 +1024,54 @@ function updateSavingsDisplay() {
 function renderTransactions(transactions) {
     const list = $('#transactionList');
     if (transactions.length === 0) {
-        list.innerHTML = '<div style="text-align:center;padding:20px;color:#ccc;">暂无收支记录</div>';
+        list.innerHTML = '<div style="text-align:center;padding:20px;color:#ccc;">今天还没有记录，点击月历查看历史</div>';
         return;
     }
     list.innerHTML = transactions.map(t => `
-        <div class="trans-item">
+        <div class="trans-item" data-id="${t.id}" title="长按可删除">
             <div>
                 <div>${escapeHtml(t.note)}</div>
-                <div class="trans-category">${escapeHtml(t.date)} · ${escapeHtml(t.category || (t.type === 'income' ? '收入' : '支出'))}</div>
+                <div class="trans-category">${escapeHtml(t.category || (t.type === 'income' ? '收入' : '支出'))}</div>
             </div>
-            <span class="amount ${t.type}">${t.type === 'expense' ? '-' : (t.type === 'save' ? '+' : '+')}¥${t.amount.toFixed(2)}</span>
+            <span class="amount ${t.type}">${t.type === 'expense' ? '-' : '+'}¥${t.amount.toFixed(2)}</span>
         </div>
     `).join('');
+
+    // 长按删除（桌面端可右键删除）
+    list.querySelectorAll('.trans-item').forEach(el => {
+        const id = parseInt(el.dataset.id);
+        let pressTimer = null;
+        let touchMoved = false;
+        const startPress = () => {
+            touchMoved = false;
+            pressTimer = setTimeout(() => {
+                pressTimer = null;
+                if (!touchMoved && confirm('删除这条记录？')) {
+                    deleteTransaction(id);
+                }
+            }, 700);
+        };
+        const cancelPress = () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } };
+        el.addEventListener('touchstart', startPress, { passive: true });
+        el.addEventListener('touchmove', () => { touchMoved = true; cancelPress(); });
+        el.addEventListener('touchend', cancelPress);
+        el.addEventListener('touchcancel', cancelPress);
+        el.addEventListener('mousedown', startPress);
+        el.addEventListener('mouseup', cancelPress);
+        el.addEventListener('mouseleave', cancelPress);
+        el.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            if (confirm('删除这条记录？')) deleteTransaction(id);
+        });
+    });
+}
+
+function deleteTransaction(id) {
+    const transactions = getData('transactions', []);
+    const filtered = transactions.filter(t => t.id !== id);
+    setData('transactions', filtered);
+    updateSavingsDisplay();
+    showToast('记录已删除');
 }
 
 // ========== 历史月历 ==========
@@ -1129,14 +1167,14 @@ function openDayDetail(dateStr) {
     `;
     $('#dayDetailSummary').innerHTML = summaryHtml;
 
-    // 列表（按时间倒序）
+    // 列表（按时间倒序），支持长按删除
     const sorted = list.slice().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
     const listEl = $('#dayDetailList');
     if (sorted.length === 0) {
         listEl.innerHTML = '<div style="text-align:center;padding:20px;color:#ccc;">当日无记录</div>';
     } else {
         listEl.innerHTML = sorted.map(t => `
-            <div class="trans-item">
+            <div class="trans-item" data-id="${t.id}" title="长按可删除">
                 <div>
                     <div>${escapeHtml(t.note || '')}</div>
                     <div class="trans-category">${escapeHtml(t.category || (t.type === 'income' ? '收入' : '支出'))}</div>
@@ -1144,6 +1182,42 @@ function openDayDetail(dateStr) {
                 <span class="amount ${t.type}">${t.type === 'expense' ? '-' : '+'}¥${t.amount.toFixed(2)}</span>
             </div>
         `).join('');
+        // 长按删除
+        listEl.querySelectorAll('.trans-item').forEach(el => {
+            const id = parseInt(el.dataset.id);
+            let pressTimer = null;
+            let touchMoved = false;
+            const startPress = () => {
+                touchMoved = false;
+                pressTimer = setTimeout(() => {
+                    pressTimer = null;
+                    if (!touchMoved && confirm('删除这条记录？')) {
+                        deleteTransaction(id);
+                        // 删除后刷新弹窗（如果还在打开）
+                        const modal = $('#dayDetailModal');
+                        if (modal.style.display !== 'none' && id) {
+                            openDayDetail(dateStr);
+                        }
+                    }
+                }, 700);
+            };
+            const cancelPress = () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } };
+            el.addEventListener('touchstart', startPress, { passive: true });
+            el.addEventListener('touchmove', () => { touchMoved = true; cancelPress(); });
+            el.addEventListener('touchend', cancelPress);
+            el.addEventListener('touchcancel', cancelPress);
+            el.addEventListener('mousedown', startPress);
+            el.addEventListener('mouseup', cancelPress);
+            el.addEventListener('mouseleave', cancelPress);
+            el.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                if (confirm('删除这条记录？')) {
+                    deleteTransaction(id);
+                    const modal = $('#dayDetailModal');
+                    if (modal.style.display !== 'none') openDayDetail(dateStr);
+                }
+            });
+        });
     }
 
     $('#dayDetailModal').style.display = 'flex';
