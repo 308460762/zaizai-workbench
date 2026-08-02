@@ -4180,7 +4180,11 @@ function updateSyncStatus() {
     html += '✅ 已开启云同步<br>';
     html += '📱 本设备: ' + getSyncDeviceName() + '<br>';
     if (cloudDevice) html += '☁️ 云端来自: ' + escapeHtml(cloudDevice) + '<br>';
-    if (cloudTime) html += '🕐 云端时间: ' + new Date(cloudTime).toLocaleString() + '<br>';
+    if (cloudTime) {
+        const ct = new Date(cloudTime);
+        const ctStr = isNaN(ct.getTime()) ? cloudTime : ct.toLocaleString();
+        html += '🕐 云端时间: ' + escapeHtml(ctStr) + '<br>';
+    }
     if (lastUpload) html += '⬆️ 上次上传: ' + new Date(parseInt(lastUpload)).toLocaleString() + '<br>';
     html += '</div>';
     statusEl.innerHTML = html;
