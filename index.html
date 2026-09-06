@@ -10,7 +10,7 @@
     <title>崽崽工作台</title>
     <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png">
     <link rel="manifest" href="manifest.json">
-    <link rel="stylesheet" href="css/style.css?v=11">
+    <link rel="stylesheet" href="css/style.css?v=13">
 </head>
 <body>
     <!-- 侧边栏 -->
@@ -113,6 +113,11 @@
                         <div class="overview-bar"></div>
                         <div class="overview-label">本月已存</div>
                         <div class="overview-value" id="overviewSaved">¥0</div>
+                    </div>
+                    <div class="overview-card monthspent">
+                        <div class="overview-bar"></div>
+                        <div class="overview-label">本月已花</div>
+                        <div class="overview-value" id="overviewMonthSpent">¥0</div>
                     </div>
                 </div>
 
@@ -617,7 +622,7 @@
             navigator.serviceWorker.register('sw.js').catch(() => {});
         }
     </script>
-    <script src="js/app.js?v=12"></script>
+    <script src="js/app.js?v=13"></script>
 
     <!-- 数据备份与恢复弹窗 -->
     <div class="modal-overlay" id="backupModal" style="display:none;">
