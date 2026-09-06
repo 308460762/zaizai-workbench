@@ -641,9 +641,13 @@ button {
 /* ========== 存钱计划 ========== */
 .savings-overview {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     gap: 12px;
     margin-bottom: 18px;
+}
+/* 第5张卡片（本月已花）居中落在第二行 */
+.savings-overview .overview-card:nth-child(5) {
+    grid-column: 2 / 3;
 }
 
 .overview-card {
@@ -687,6 +691,11 @@ button {
     background: linear-gradient(90deg, #F48FB1, #EC407A);
 }
 
+/* 本月已花：橙色系，与今日已花（红）区分 */
+.overview-card.monthspent .overview-bar {
+    background: linear-gradient(90deg, #FFB74D, #FF9800);
+}
+
 .overview-label {
     font-size: 13px;
     color: var(--text-secondary);
@@ -702,6 +711,7 @@ button {
 .overview-card.spent .overview-value { color: #FF5252; }
 .overview-card.income .overview-value { color: #66BB6A; }
 .overview-card.saved .overview-value { color: #EC407A; }
+.overview-card.monthspent .overview-value { color: #FF9800; }
 
 .savings-block {
     background: var(--bg-card);
