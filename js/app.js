@@ -1003,6 +1003,8 @@ function updateSavingsDisplay() {
     $('#overviewSaved').textContent = `¥${monthSaved.toFixed(0)}`;
     const monthSpentEl = $('#overviewMonthSpent');
     if (monthSpentEl) monthSpentEl.textContent = `¥${monthExpense.toFixed(0)}`;
+    const monthIncomeEl = $('#overviewMonthIncome');
+    if (monthIncomeEl) monthIncomeEl.textContent = `¥${monthIncome.toFixed(0)}`;
 
     // 预算进度
     const budgetPct = budget > 0 ? Math.min(100, (todayExpense / budget) * 100) : 0;
