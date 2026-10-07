@@ -1032,40 +1032,89 @@ function renderTransactions(transactions) {
         return;
     }
     list.innerHTML = transactions.map(t => `
-        <div class="trans-item" data-id="${t.id}" title="长按可删除">
-            <div>
-                <div>${escapeHtml(t.note)}</div>
-                <div class="trans-category">${escapeHtml(t.category || (t.type === 'income' ? '收入' : '支出'))}</div>
+        <div class="swipe-wrap">
+            <div class="trans-item swipe-content" data-id="${t.id}" title="左滑可删除">
+                <div>
+                    <div>${escapeHtml(t.note)}</div>
+                    <div class="trans-category">${escapeHtml(t.category || (t.type === 'income' ? '收入' : '支出'))}</div>
+                </div>
+                <span class="amount ${t.type}">${t.type === 'expense' ? '-' : '+'}¥${t.amount.toFixed(2)}</span>
             </div>
-            <span class="amount ${t.type}">${t.type === 'expense' ? '-' : '+'}¥${t.amount.toFixed(2)}</span>
+            <button class="swipe-delete" data-id="${t.id}">删除</button>
         </div>
     `).join('');
 
-    // 长按删除（桌面端可右键删除）
-    list.querySelectorAll('.trans-item').forEach(el => {
-        const id = parseInt(el.dataset.id);
-        let pressTimer = null;
-        let touchMoved = false;
-        const startPress = () => {
-            touchMoved = false;
-            pressTimer = setTimeout(() => {
-                pressTimer = null;
-                if (!touchMoved && confirm('删除这条记录？')) {
-                    deleteTransaction(id);
-                }
-            }, 700);
+    bindSwipeDelete(list, null);
+}
+
+// 左滑删除：滑动 .swipe-content 露出右侧删除按钮
+function bindSwipeDelete(listEl, afterDelete) {
+    const SWIPE_WIDTH = 78;   // 删除按钮宽度
+    const OPEN_THRESHOLD = 40; // 超过该距离松手即打开
+
+    const closeAll = (except) => {
+        listEl.querySelectorAll('.swipe-content').forEach(el => {
+            if (el !== except) {
+                el.style.transform = 'translateX(0)';
+                el.dataset.open = '';
+            }
+        });
+    };
+
+    listEl.querySelectorAll('.swipe-wrap').forEach(wrap => {
+        const content = wrap.querySelector('.swipe-content');
+        const delBtn = wrap.querySelector('.swipe-delete');
+        if (!content || !delBtn) return;
+        const id = parseInt(content.dataset.id);
+
+        let sx = 0, sy = 0, dx = 0, lock = null;
+        const isOpen = () => content.dataset.open === '1';
+
+        content.addEventListener('touchstart', (e) => {
+            sx = e.touches[0].clientX;
+            sy = e.touches[0].clientY;
+            dx = 0;
+            lock = null;
+            closeAll(content);
+        }, { passive: true });
+
+        content.addEventListener('touchmove', (e) => {
+            const cx = e.touches[0].clientX;
+            const cy = e.touches[0].clientY;
+            if (lock === null && (Math.abs(cx - sx) > 8 || Math.abs(cy - sy) > 8)) {
+                lock = Math.abs(cx - sx) > Math.abs(cy - sy) ? 'h' : 'v';
+                if (lock === 'h') content.classList.add('swiping');
+            }
+            if (lock !== 'h') return;
+            dx = cx - sx + (isOpen() ? -SWIPE_WIDTH : 0);
+            dx = Math.max(-SWIPE_WIDTH - 10, Math.min(0, dx));
+            content.style.transform = `translateX(${dx}px)`;
+        }, { passive: true });
+
+        const endSwipe = () => {
+            if (lock === 'h') {
+                const open = dx < -OPEN_THRESHOLD;
+                content.dataset.open = open ? '1' : '';
+                content.classList.remove('swiping');
+                content.style.transform = open ? `translateX(-${SWIPE_WIDTH}px)` : 'translateX(0)';
+            }
+            sx = 0; sy = 0; dx = 0; lock = null;
         };
-        const cancelPress = () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } };
-        el.addEventListener('touchstart', startPress, { passive: true });
-        el.addEventListener('touchmove', () => { touchMoved = true; cancelPress(); });
-        el.addEventListener('touchend', cancelPress);
-        el.addEventListener('touchcancel', cancelPress);
-        el.addEventListener('mousedown', startPress);
-        el.addEventListener('mouseup', cancelPress);
-        el.addEventListener('mouseleave', cancelPress);
-        el.addEventListener('contextmenu', (e) => {
+        content.addEventListener('touchend', endSwipe);
+        content.addEventListener('touchcancel', endSwipe);
+
+        delBtn.addEventListener('click', () => {
+            deleteTransaction(id);
+            if (afterDelete) afterDelete();
+        });
+
+        // 桌面端兼容：右键删除
+        content.addEventListener('contextmenu', (e) => {
             e.preventDefault();
-            if (confirm('删除这条记录？')) deleteTransaction(id);
+            if (confirm('删除这条记录？')) {
+                deleteTransaction(id);
+                if (afterDelete) afterDelete();
+            }
         });
     });
 }
@@ -1171,56 +1220,28 @@ function openDayDetail(dateStr) {
     `;
     $('#dayDetailSummary').innerHTML = summaryHtml;
 
-    // 列表（按时间倒序），支持长按删除
+    // 列表（按时间倒序），支持左滑删除
     const sorted = list.slice().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
     const listEl = $('#dayDetailList');
     if (sorted.length === 0) {
         listEl.innerHTML = '<div style="text-align:center;padding:20px;color:#ccc;">当日无记录</div>';
     } else {
         listEl.innerHTML = sorted.map(t => `
-            <div class="trans-item" data-id="${t.id}" title="长按可删除">
-                <div>
-                    <div>${escapeHtml(t.note || '')}</div>
-                    <div class="trans-category">${escapeHtml(t.category || (t.type === 'income' ? '收入' : '支出'))}</div>
+            <div class="swipe-wrap">
+                <div class="trans-item swipe-content" data-id="${t.id}" title="左滑可删除">
+                    <div>
+                        <div>${escapeHtml(t.note || '')}</div>
+                        <div class="trans-category">${escapeHtml(t.category || (t.type === 'income' ? '收入' : '支出'))}</div>
+                    </div>
+                    <span class="amount ${t.type}">${t.type === 'expense' ? '-' : '+'}¥${t.amount.toFixed(2)}</span>
                 </div>
-                <span class="amount ${t.type}">${t.type === 'expense' ? '-' : '+'}¥${t.amount.toFixed(2)}</span>
+                <button class="swipe-delete" data-id="${t.id}">删除</button>
             </div>
         `).join('');
-        // 长按删除
-        listEl.querySelectorAll('.trans-item').forEach(el => {
-            const id = parseInt(el.dataset.id);
-            let pressTimer = null;
-            let touchMoved = false;
-            const startPress = () => {
-                touchMoved = false;
-                pressTimer = setTimeout(() => {
-                    pressTimer = null;
-                    if (!touchMoved && confirm('删除这条记录？')) {
-                        deleteTransaction(id);
-                        // 删除后刷新弹窗（如果还在打开）
-                        const modal = $('#dayDetailModal');
-                        if (modal.style.display !== 'none' && id) {
-                            openDayDetail(dateStr);
-                        }
-                    }
-                }, 700);
-            };
-            const cancelPress = () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } };
-            el.addEventListener('touchstart', startPress, { passive: true });
-            el.addEventListener('touchmove', () => { touchMoved = true; cancelPress(); });
-            el.addEventListener('touchend', cancelPress);
-            el.addEventListener('touchcancel', cancelPress);
-            el.addEventListener('mousedown', startPress);
-            el.addEventListener('mouseup', cancelPress);
-            el.addEventListener('mouseleave', cancelPress);
-            el.addEventListener('contextmenu', (e) => {
-                e.preventDefault();
-                if (confirm('删除这条记录？')) {
-                    deleteTransaction(id);
-                    const modal = $('#dayDetailModal');
-                    if (modal.style.display !== 'none') openDayDetail(dateStr);
-                }
-            });
+        bindSwipeDelete(listEl, () => {
+            // 删除后刷新弹窗（如果还在打开）
+            const modal = $('#dayDetailModal');
+            if (modal.style.display !== 'none') openDayDetail(dateStr);
         });
     }
 
